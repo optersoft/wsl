@@ -1,26 +1,40 @@
-# Test on every push; build + publish to PyPI on a version tag.
+# Test on every push; build and publish to PyPI on a version tag.
 #
-# Publishing uses PyPI trusted publishing (OIDC) — no token in CI variables.
-# Configure the publisher on https://pypi.org/manage/project/wslx/settings/publishing/
-# with: provider GitLab, namespace `xtec/tool`, project `wsl`,
-# top-level pipeline file `.gitlab-ci.yml`, environment `pypi`.
+# Publishing uses PyPI trusted publishing (OIDC) — no token is stored anywhere.
+# It needs a publisher registered at
+# https://pypi.org/manage/account/publishing/ with:
+#
+#   provider   GitLab
+#   namespace  xtec/tool
+#   project    wsl
+#   workflow   .gitlab-ci.yml
+#   env        pypi   (optional; must match the `environment:` below if set)
+#
+# Release: `git tag -a v0.1.0 -m … && git push origin v0.1.0`, with the tag
+# matching the `version` in pyproject.toml.
+
+variables:
+  UV_VERSION: "0.10.7"
+  PYTHON_VERSION: "3.12"
+  BASE_LAYER: trixie-slim
+  # GitLab CI mounts the build directory separately, so uv must copy, not link.
+  UV_LINK_MODE: copy
+  UV_CACHE_DIR: .uv-cache
 
 default:
-  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+  cache:
+    - key:
+        files:
+          - uv.lock
+      paths:
+        - $UV_CACHE_DIR
+  after_script:
+    - uv cache prune --ci
 
 stages:
   - test
   - publish
-
-variables:
-  UV_CACHE_DIR: .uv-cache
-
-cache:
-  key:
-    files:
-      - uv.lock
-  paths:
-    - .uv-cache
 
 test:
   stage: test
@@ -40,4 +54,7 @@ publish:
       aud: pypi
   script:
     - uv build
+    # Catch a wheel that is missing files before it reaches PyPI.
+    - uv run --isolated --no-project --with dist/*.whl -- wslx --version
+    - uv run --isolated --no-project --with dist/*.tar.gz -- wslx --version
     - uv publish --trusted-publishing always
