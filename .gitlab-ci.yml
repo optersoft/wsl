@@ -1,0 +1,43 @@
+# Test on every push; build + publish to PyPI on a version tag.
+#
+# Publishing uses PyPI trusted publishing (OIDC) — no token in CI variables.
+# Configure the publisher on https://pypi.org/manage/project/wslx/settings/publishing/
+# with: provider GitLab, namespace `xtec/tool`, project `wsl`,
+# top-level pipeline file `.gitlab-ci.yml`, environment `pypi`.
+
+default:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+stages:
+  - test
+  - publish
+
+variables:
+  UV_CACHE_DIR: .uv-cache
+
+cache:
+  key:
+    files:
+      - uv.lock
+  paths:
+    - .uv-cache
+
+test:
+  stage: test
+  script:
+    - uv sync --all-groups --frozen
+    - uv run ruff check
+    - uv run ruff format --check .
+    - uv run pytest -q
+
+publish:
+  stage: publish
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  environment: pypi
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  script:
+    - uv build
+    - uv publish --trusted-publishing always
