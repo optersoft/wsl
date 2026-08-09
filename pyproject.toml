@@ -26,9 +26,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/xtec/tool/wsl"
-Repository = "https://gitlab.com/xtec/tool/wsl"
-Issues = "https://gitlab.com/xtec/tool/wsl/-/issues"
+Homepage = "https://github.com/ddemingo/wsl"
+Repository = "https://github.com/ddemingo/wsl"
+Issues = "https://github.com/ddemingo/wsl/issues"
 
 [project.scripts]
 wslx = "wslx.cli:main"
