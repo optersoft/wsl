@@ -192,16 +192,11 @@ def start(name: str) -> None:
     if not registered(name):
         raise WslError(f"{name}: not registered")
 
-    # Pin the default user *before* the first boot. WSL binds DefaultUid when
-    # the instance launches, so setting it afterwards leaves the instance that
-    # is now running — and the shell `connect` is about to open in it — as
-    # root, until something terminates the distribution. The [user] default in
-    # wsl.conf is unreliable, hence the Lxss registry key.
-    set_default_uid(name, BOX_UID)
-
     print(f"{name}: starting ...", end="", flush=True)
-    # Boot as root explicitly: on a first boot cloud-init has not created the
-    # `box` user yet, so uid 1000 has no passwd entry to start the shell as.
+    # Boot as root explicitly. On a first boot cloud-init has not created `box`
+    # yet, so uid 1000 has no passwd entry: pinning DefaultUid before this call
+    # makes WSL fail to start the systemd user session, which leaves cloud-init
+    # degraded and the distribution unseeded. Configure after booting.
     _call(
         "--distribution",
         name,
@@ -213,6 +208,13 @@ def start(name: str) -> None:
         error=f"{name}: failed to start",
     )
     print(" done.")
+
+    # The [user] default in wsl.conf is unreliable; force the default UID to
+    # 1000 (the `box` user) via the Lxss registry key. WSL binds DefaultUid
+    # when an instance launches, so this takes effect from the next launch —
+    # the instance booted above stays root. That is why `connect` passes
+    # `--user box` explicitly rather than relying on the default.
+    set_default_uid(name, BOX_UID)
 
 
 def set_default_uid(name: str, uid: int = BOX_UID) -> None:

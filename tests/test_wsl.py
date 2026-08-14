@@ -71,12 +71,16 @@ def test_parse_verbose_ignores_the_english_no_distributions_message() -> None:
     assert parse_verbose(output) == []
 
 
-def test_start_pins_the_default_user_before_booting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """WSL binds DefaultUid when the instance launches, so the order matters.
+def test_start_boots_as_root_before_pinning_the_default_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The order is load-bearing in both directions.
 
-    Booting first leaves the running instance as root however correct the
-    registry value is — `wsl -d <name> -- whoami` answered `root` on a CI
-    runner with DefaultUid already set to 1000.
+    Pinning DefaultUid to 1000 first makes WSL boot with a default user that
+    cloud-init has not created yet; the systemd user session then fails and
+    cloud-init finishes degraded, leaving the distribution unseeded (observed
+    on a windows-2025 runner). Booting explicitly as root avoids depending on
+    whatever DefaultUid happens to hold from a previous run.
     """
     calls: list[str] = []
     monkeypatch.setattr(wsl, "_require_windows", lambda: None)
@@ -87,9 +91,10 @@ def test_start_pins_the_default_user_before_booting(monkeypatch: pytest.MonkeyPa
 
     wsl.start("alfa")
 
-    assert calls[0] == f"uid={wsl.BOX_UID}"
-    # ... and the boot itself must not depend on that user existing yet.
-    assert calls[1] == "--distribution alfa --user root --exec dbus-launch true"
+    assert calls == [
+        "--distribution alfa --user root --exec dbus-launch true",
+        f"uid={wsl.BOX_UID}",
+    ]
 
 
 def test_registered_matches_whole_names_only(monkeypatch: pytest.MonkeyPatch) -> None:

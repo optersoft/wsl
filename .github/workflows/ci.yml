@@ -88,22 +88,32 @@ jobs:
           # confusing ones.
           $init = (wsl.exe -d ci -u root -- ps -p 1 -o comm=).Trim()
           if ($init -ne 'systemd') { throw "PID 1 is '$init', not systemd — cloud-init cannot run" }
+
+          # Wait for cloud-init but do not gate on its exit code: DataSourceWSL
+          # intermittently reports `no local data found` and falls back, which
+          # exits non-zero while still saying "status: done". What the seeding
+          # was for is asserted below, and that is the real gate.
           wsl.exe -d ci -u root -- cloud-init status --wait
-          if ($LASTEXITCODE -ne 0) { throw "cloud-init did not finish cleanly" }
+          Write-Host "cloud-init exit: $LASTEXITCODE"
 
           $hostname = (wsl.exe -d ci -u root -- hostname).Trim()
           if ($hostname -ne 'ci') { throw "hostname is '$hostname', expected 'ci'" }
 
-          $uid = (wsl.exe -d ci -u root -- id -u box).Trim()
-          if ($uid -ne '1000') { throw "box uid is '$uid', expected 1000" }
-
-          # `wslx start` pins DefaultUid through the Lxss registry key, so an
-          # unqualified `wsl -d ci` must land as box, not root.
-          $who = (wsl.exe -d ci -- whoami).Trim()
-          if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
+          # The Noble image's own `ubuntu` account is cloud-init's default
+          # user, so uid 1000 resolving to `box` is what proves the wslx seed
+          # was consumed rather than the built-in fallback.
+          $owner = (wsl.exe -d ci -u root -- id -un 1000).Trim()
+          if ($owner -ne 'box') { throw "uid 1000 is '$owner', expected 'box' — the cloud-init seed was not applied" }
 
           wsl.exe -d ci -u box -- sudo -n true
           if ($LASTEXITCODE -ne 0) { throw "box does not have passwordless sudo" }
+
+          # `start` pins DefaultUid, but WSL binds it when an instance
+          # launches, so it applies from the next launch — which is also the
+          # first moment `box` exists. Terminate, then check.
+          wsl.exe --terminate ci
+          $who = (wsl.exe -d ci -- whoami).Trim()
+          if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
 
       - name: list, stop and delete
         run: |
