@@ -10,7 +10,7 @@ juggling.
 ## Documentation
 
 **All instructions and the tutorial live at
-<https://academy.optersoft.com/tool/wsl>.**
+<https://academy.optersoft.com/windows/wsl>.**
 
 ## Install
 

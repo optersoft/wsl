@@ -31,8 +31,8 @@ dependencies = [
 [project.urls]
 # The instructions and the tutorial live on academy, not in the README -- so
 # Homepage points there, and the repository is a separate link.
-Homepage = "https://academy.optersoft.com/tool/wsl"
-Documentation = "https://academy.optersoft.com/tool/wsl"
+Homepage = "https://academy.optersoft.com/windows/wsl"
+Documentation = "https://academy.optersoft.com/windows/wsl"
 Repository = "https://github.com/optersoft/wsl"
 Issues = "https://github.com/optersoft/wsl/issues"
 
