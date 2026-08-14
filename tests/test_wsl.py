@@ -86,6 +86,7 @@ def test_start_boots_as_root_before_pinning_the_default_user(
     monkeypatch.setattr(wsl, "_require_windows", lambda: None)
     monkeypatch.setattr(wsl, "running", lambda name: False)
     monkeypatch.setattr(wsl, "registered", lambda name: True)
+    monkeypatch.setattr(wsl, "managed", lambda name: False)
     monkeypatch.setattr(wsl, "set_default_uid", lambda name, uid: calls.append(f"uid={uid}"))
     monkeypatch.setattr(wsl, "_call", lambda *args, error: calls.append(" ".join(args)))
 
@@ -95,6 +96,84 @@ def test_start_boots_as_root_before_pinning_the_default_user(
         "--distribution alfa --user root --exec dbus-launch true",
         f"uid={wsl.BOX_UID}",
     ]
+
+
+def _stub_start(monkeypatch: pytest.MonkeyPatch, *, managed: bool, seeded: bool) -> None:
+    monkeypatch.setattr(wsl, "_require_windows", lambda: None)
+    monkeypatch.setattr(wsl, "running", lambda name: False)
+    monkeypatch.setattr(wsl, "registered", lambda name: True)
+    monkeypatch.setattr(wsl, "managed", lambda name: managed)
+    monkeypatch.setattr(wsl, "seeded", lambda name: seeded)
+    monkeypatch.setattr(wsl, "set_default_uid", lambda name, uid: None)
+    monkeypatch.setattr(wsl, "_call", lambda *args, error: None)
+
+
+def test_start_rejects_a_distribution_cloud_init_never_seeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cloud-init reports `status: done` after falling back, so wslx must look.
+
+    Otherwise `create` and `start` both succeed and the failure only surfaces
+    later, as `connect` dying with "no such user".
+    """
+    _stub_start(monkeypatch, managed=True, seeded=False)
+
+    with pytest.raises(wsl.WslError, match="cloud-init did not apply"):
+        wsl.start("alfa")
+
+
+def test_start_accepts_a_seeded_distribution(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_start(monkeypatch, managed=True, seeded=True)
+    wsl.start("alfa")
+
+
+def test_start_does_not_demand_a_seed_from_someone_elses_distribution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A distribution wslx did not import has no reason to hold a box user."""
+    _stub_start(monkeypatch, managed=False, seeded=False)
+    wsl.start("Ubuntu")
+
+
+def test_seeded_reads_the_name_behind_uid_1000(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cloud-init status` cannot answer this — uid 1000's name can."""
+    captured: list[tuple[str, ...]] = []
+
+    def fake_capture(*args: str) -> str:
+        captured.append(args)
+        return "box\n" if "id" in args else "status: done\n"
+
+    monkeypatch.setattr(wsl, "_capture", fake_capture)
+    assert wsl.seeded("alfa")
+
+    # It must wait for cloud-init first, or it races a boot still in progress.
+    assert captured[0] == (
+        "--distribution",
+        "alfa",
+        "--user",
+        "root",
+        "--exec",
+        "cloud-init",
+        "status",
+        "--wait",
+    )
+    # ... and it must ask as root, because box is exactly what may be missing.
+    assert captured[1] == (
+        "--distribution",
+        "alfa",
+        "--user",
+        "root",
+        "--exec",
+        "id",
+        "-un",
+        "1000",
+    )
+
+
+def test_seeded_rejects_the_cloud_init_fallback_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ubuntu` at uid 1000 is what an ignored seed looks like."""
+    monkeypatch.setattr(wsl, "_capture", lambda *args: "ubuntu\n")
+    assert not wsl.seeded("alfa")
 
 
 def test_registered_matches_whole_names_only(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -216,6 +216,33 @@ def start(name: str) -> None:
     # `--user box` explicitly rather than relying on the default.
     set_default_uid(name, BOX_UID)
 
+    # Only distributions wslx imported carry a seed to check; anything else is
+    # someone else's and is not supposed to have a box user.
+    if managed(name) and not seeded(name):
+        raise WslError(
+            f"{name}: cloud-init did not apply the wslx seed — uid {BOX_UID} is not "
+            f"{BOX_USER!r}, so there is no {BOX_USER} user, hostname or sudo rule. "
+            "This is usually a transient failure of cloud-init's WSL datasource; "
+            f"run `wslx delete {name}` and create it again."
+        )
+
+
+def seeded(name: str) -> bool:
+    """Did cloud-init apply the wslx seed to `name`?
+
+    Not a question `cloud-init status` can answer: `DataSourceWSL`
+    intermittently finds no local data, silently falls back to cloud-init's
+    built-in config and still finishes with `status: done`. What that fallback
+    builds is the Ubuntu image's own `ubuntu` account at uid 1000 — exactly
+    where `box` should be — so the name behind uid 1000 is what separates a
+    seeded distribution from an unseeded one.
+
+    Runs as root because the whole point is that `box` may not exist.
+    """
+    _capture("--distribution", name, "--user", "root", "--exec", "cloud-init", "status", "--wait")
+    owner = _capture("--distribution", name, "--user", "root", "--exec", "id", "-un", str(BOX_UID))
+    return owner.strip() == BOX_USER
+
 
 def set_default_uid(name: str, uid: int = BOX_UID) -> None:
     """Set `DefaultUid` for `name` under HKCU\\...\\Lxss."""

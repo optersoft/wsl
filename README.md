@@ -53,6 +53,14 @@ Inside every distribution wslx creates:
   and `/etc/hosts`)
 - `install-docker` alias — `curl -L sh.xtec.dev/docker.sh | sh`
 
+All of it comes from cloud-init, which WSL runs on the distribution's first
+boot. That occasionally misfires: cloud-init's WSL datasource reports it found
+no local data, falls back to its own defaults, and still finishes with
+`status: done` — leaving a distribution whose UID 1000 is `ubuntu` rather than
+`box`, with the wrong hostname and no sudo rule. `wslx start` checks for this
+and fails with an explanation instead of reporting success; delete the
+distribution and create it again.
+
 ## Where things live
 
 | What | Where |
