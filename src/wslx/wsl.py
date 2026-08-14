@@ -31,6 +31,10 @@ BOX_UID = 1000
 #: The `box` user's login name inside the distribution.
 BOX_USER = "box"
 
+#: Every value the version column of `wsl --list --verbose` can hold. Used to
+#: tell a real table row from a line of localised prose — see `parse_verbose`.
+WSL_VERSIONS = frozenset({"1", "2"})
+
 
 class WslError(Exception):
     """Anything wslx knows how to explain to the user."""
@@ -109,6 +113,13 @@ def parse_verbose(output: str) -> list[Distribution]:
 
     The header line is localised, so it is identified positionally (it is
     always first) rather than by its text.
+
+    When no distribution is registered, `wsl` exits non-zero and prints prose
+    instead of a table ("... no tiene distribuciones instaladas. Para instalar
+    las distribuciones, ..."). `_capture` discards the exit code, so that prose
+    reaches us and any sentence of three or more words used to parse as a row.
+    The version column is the one field that is never localised — it is always
+    `1` or `2` — so it is what separates a real row from a translated sentence.
     """
     distributions = []
     for raw in output.splitlines()[1:]:
@@ -120,6 +131,8 @@ def parse_verbose(output: str) -> list[Distribution]:
         if len(fields) < 3:
             continue
         name, state, version = fields[0], fields[1], fields[2]
+        if version not in WSL_VERSIONS:
+            continue
         distributions.append(Distribution(name, state, version, default))
     return distributions
 

@@ -43,6 +43,34 @@ def test_parse_verbose_ignores_short_rows() -> None:
     assert parse_verbose("NAME STATE VERSION\n  broken\n") == []
 
 
+def test_parse_verbose_ignores_the_no_distributions_message() -> None:
+    """A machine with no distributions gets prose, not a table.
+
+    Captured verbatim from a Spanish Windows 10 22H2 guest, where `wsl --list
+    --verbose` exits -1 and prints this. `_capture` drops the exit code, so the
+    parser is the only thing standing between that prose and a bogus row —
+    "Para instalar las" used to be listed as a distribution.
+    """
+    output = (
+        "El subsistema de Windows para Linux no tiene distribuciones instaladas.\r\n"
+        "\r\n"
+        "Para instalar las distribuciones, se puede visitar Microsoft Store:\r\n"
+        "\r\n"
+        "https://aka.ms/wslstore\r\n"
+    )
+    assert parse_verbose(output) == []
+
+
+def test_parse_verbose_ignores_the_english_no_distributions_message() -> None:
+    output = (
+        "Windows Subsystem for Linux has no installed distributions.\r\n"
+        "\r\n"
+        "Use 'wsl.exe --list --online' to list available distributions\r\n"
+        "and 'wsl.exe --install <Distro>' to install.\r\n"
+    )
+    assert parse_verbose(output) == []
+
+
 def test_registered_matches_whole_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """`dev2` must not make `dev` look registered (the Rust port used substrings)."""
     monkeypatch.setattr(wsl, "_capture", lambda *args: "dev2\nUbuntu\n")
