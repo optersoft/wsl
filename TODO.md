@@ -4,16 +4,17 @@
 
 Nothing open.
 
-## Done
+## Do not "fix" these
 
-- [x] The cloud-init misfire note, cut from README.md in the 2026-08-14 trim, now
-      lives on https://academy.optersoft.com/tool/wsl under its own heading,
-      *When the seed does not apply* (2026-08-14). The page shows the failure the
-      way a user meets it — `wslx start` printing the `WslError` from
-      `src/wslx/wsl.py:209`, `cloud-init status` answering `done`, `id -un 1000`
-      answering `ubuntu` — and gives the fix, `wslx delete` + `wslx create`, an
-      import rather than another download. An aside carries why re-seeding in
-      place was tried and dropped (the comment at `wsl.py:230`).
-      ⚠️ The content tree is no longer a sibling checkout: it is `pages/` inside
-      `~/optersoft/academy`, and the source page is `pages/tool/wsl.md` with
-      `.ca`/`.es` variants beside it.
+- `v0.1.0` tags a 2026-08-04 commit and has no PyPI release behind it — it was
+  cut before the repo reached GitHub, so the publish job never ran. Left where
+  it is; releases start at 0.1.1.
+
+## Shipped
+
+- 2026-08-14 · README trimmed to install + develop, everything else moved to
+  <https://academy.optersoft.com/tool/wsl>; `Homepage`/`Documentation` follow it · `01f9141`
+- 2026-08-14 · wslx 0.1.1 on PyPI — the first release that actually uploaded,
+  via trusted publishing from `optersoft/wsl` · `c74993e` / tag `v0.1.1`
+- 2026-08-14 · The cloud-init misfire note now lives on the academy page under
+  *When the seed does not apply*, with the `delete` + `create` fix · `academy/pages/tool/wsl.md`
