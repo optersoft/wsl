@@ -41,8 +41,90 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q
 
+  # Everything above runs on Linux, where the whole Windows half of wslx is
+  # skipped. This job is the only thing that executes `wsl --import`, the
+  # winreg DefaultUid write and the cloud-init seeding for real. The runner
+  # image ships WSL2 as default (nested virtualization has been available on
+  # GitHub's Windows runners since the Dadsv5 move in January 2024).
+  windows:
+    runs-on: windows-2025
+    env:
+      # wsl.exe writes UTF-16LE without this, which the output parsers then
+      # have to guess their way out of.
+      WSL_UTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --all-groups --frozen
+      - run: uv run pytest -q
+
+      # A fresh runner has no distribution registered, so `wsl --list
+      # --verbose` prints prose and exits non-zero. That is exactly the input
+      # that used to yield a bogus row, so assert the empty case before
+      # creating anything.
+      - name: list with no distributions registered
+        run: |
+          $out = uv run wslx list 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'No WSL distributions registered') {
+            throw "expected the empty-list message, got: $out"
+          }
+
+      - name: create, seed and inspect a distribution
+        run: |
+          uv run wslx create ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx create failed" }
+          uv run wslx start ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx start failed" }
+
+          # cloud-init is what creates the box user and sets the hostname, and
+          # it only runs under systemd. Checking PID 1 first turns "the seeding
+          # silently did nothing" into a named failure instead of three
+          # confusing ones.
+          $init = (wsl.exe -d ci -u root -- ps -p 1 -o comm=).Trim()
+          if ($init -ne 'systemd') { throw "PID 1 is '$init', not systemd — cloud-init cannot run" }
+          wsl.exe -d ci -u root -- cloud-init status --wait
+          if ($LASTEXITCODE -ne 0) { throw "cloud-init did not finish cleanly" }
+
+          $hostname = (wsl.exe -d ci -u root -- hostname).Trim()
+          if ($hostname -ne 'ci') { throw "hostname is '$hostname', expected 'ci'" }
+
+          $uid = (wsl.exe -d ci -u root -- id -u box).Trim()
+          if ($uid -ne '1000') { throw "box uid is '$uid', expected 1000" }
+
+          # `wslx start` pins DefaultUid through the Lxss registry key, so an
+          # unqualified `wsl -d ci` must land as box, not root.
+          $who = (wsl.exe -d ci -- whoami).Trim()
+          if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
+
+          wsl.exe -d ci -u box -- sudo -n true
+          if ($LASTEXITCODE -ne 0) { throw "box does not have passwordless sudo" }
+
+      - name: list, stop and delete
+        run: |
+          $out = uv run wslx list 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch '(?m)^\|\s*ci\b.*\|\s*2\s*\|\s*yes\s*\|') {
+            throw "expected ci listed as a managed version-2 distribution, got: $out"
+          }
+
+          uv run wslx stop ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx stop failed" }
+
+          uv run wslx delete ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx delete failed" }
+
+          # delete must take the disk and the cloud-init seed with it.
+          if (Test-Path "$env:APPDATA\wslx\ci") { throw "instance directory survived delete" }
+          if (Test-Path "$env:USERPROFILE\.cloud-init\ci.user-data") { throw "cloud-init seed survived delete" }
+
   publish:
-    needs: test
+    needs: [test, windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
