@@ -96,4 +96,8 @@ resolution) and the platform guard itself.
 
 ## License
 
-AGPL-3.0-only. © David de Mingo.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE),
+at your option. Unless you state otherwise, any contribution you submit for
+inclusion is dual-licensed on those same terms.
+
+Copyright © 2026 Optersoft, S.L.

@@ -3,10 +3,13 @@ name = "wslx"
 version = "0.1.0"
 description = "Manage Ubuntu WSL virtual machines from the command line"
 readme = "README.md"
-license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+# Dual, at the user's choice -- the same pair `make` and `uv` ship under. MIT is
+# the shortest read; Apache-2.0 adds an express patent grant (§3) and an explicit
+# reservation of trademark rights (§6), which is what a company is asked for.
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 authors = [
-    { name = "David de Mingo", email = "david@xtec.dev" }
+    { name = "Optersoft, S.L.", email = "david@optersoft.com" }
 ]
 requires-python = ">=3.11"
 keywords = ["wsl", "windows", "ubuntu", "vm", "cloud-init"]
