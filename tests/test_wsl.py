@@ -98,14 +98,27 @@ def test_start_boots_as_root_before_pinning_the_default_user(
     ]
 
 
-def _stub_start(monkeypatch: pytest.MonkeyPatch, *, managed: bool, seeded: bool) -> None:
+def _stub_start(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    managed: bool,
+    seeded: bool,
+) -> list[str]:
+    """Stub `start`'s collaborators and return a log of what it reached for."""
+    log: list[str] = []
     monkeypatch.setattr(wsl, "_require_windows", lambda: None)
     monkeypatch.setattr(wsl, "running", lambda name: False)
     monkeypatch.setattr(wsl, "registered", lambda name: True)
     monkeypatch.setattr(wsl, "managed", lambda name: managed)
-    monkeypatch.setattr(wsl, "seeded", lambda name: seeded)
     monkeypatch.setattr(wsl, "set_default_uid", lambda name, uid: None)
     monkeypatch.setattr(wsl, "_call", lambda *args, error: None)
+
+    def fake_seeded(name: str) -> bool:
+        log.append("seeded")
+        return seeded
+
+    monkeypatch.setattr(wsl, "seeded", fake_seeded)
+    return log
 
 
 def test_start_rejects_a_distribution_cloud_init_never_seeded(
@@ -114,25 +127,44 @@ def test_start_rejects_a_distribution_cloud_init_never_seeded(
     """cloud-init reports `status: done` after falling back, so wslx must look.
 
     Otherwise `create` and `start` both succeed and the failure only surfaces
-    later, as `connect` dying with "no such user".
+    later, as `connect` dying with "no such user". It fails rather than
+    re-seeding in place: see the note above `start` for what that produced.
     """
-    _stub_start(monkeypatch, managed=True, seeded=False)
+    log = _stub_start(monkeypatch, managed=True, seeded=False)
 
     with pytest.raises(wsl.WslError, match="cloud-init did not apply"):
         wsl.start("alfa")
 
+    assert log == ["seeded"]
+
 
 def test_start_accepts_a_seeded_distribution(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_start(monkeypatch, managed=True, seeded=True)
+    log = _stub_start(monkeypatch, managed=True, seeded=True)
     wsl.start("alfa")
+    assert log == ["seeded"]
 
 
 def test_start_does_not_demand_a_seed_from_someone_elses_distribution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A distribution wslx did not import has no reason to hold a box user."""
-    _stub_start(monkeypatch, managed=False, seeded=False)
+    log = _stub_start(monkeypatch, managed=False, seeded=False)
     wsl.start("Ubuntu")
+    assert log == []
+
+
+def test_the_failure_message_says_recreating_is_cheap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The advice has to be actionable, or people will fear the 356 MB rootfs.
+
+    `create` reuses the cached image, so recreating is an import.
+    """
+    _stub_start(monkeypatch, managed=True, seeded=False)
+
+    with pytest.raises(wsl.WslError) as raised:
+        wsl.start("alfa")
+
+    assert "wslx delete alfa" in str(raised.value)
+    assert "cached" in str(raised.value)
 
 
 def test_seeded_reads_the_name_behind_uid_1000(monkeypatch: pytest.MonkeyPatch) -> None:

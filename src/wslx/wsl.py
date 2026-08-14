@@ -193,20 +193,7 @@ def start(name: str) -> None:
         raise WslError(f"{name}: not registered")
 
     print(f"{name}: starting ...", end="", flush=True)
-    # Boot as root explicitly. On a first boot cloud-init has not created `box`
-    # yet, so uid 1000 has no passwd entry: pinning DefaultUid before this call
-    # makes WSL fail to start the systemd user session, which leaves cloud-init
-    # degraded and the distribution unseeded. Configure after booting.
-    _call(
-        "--distribution",
-        name,
-        "--user",
-        "root",
-        "--exec",
-        "dbus-launch",
-        "true",
-        error=f"{name}: failed to start",
-    )
+    _boot(name, error=f"{name}: failed to start")
     print(" done.")
 
     # The [user] default in wsl.conf is unreliable; force the default UID to
@@ -222,9 +209,34 @@ def start(name: str) -> None:
         raise WslError(
             f"{name}: cloud-init did not apply the wslx seed — uid {BOX_UID} is not "
             f"{BOX_USER!r}, so there is no {BOX_USER} user, hostname or sudo rule. "
-            "This is usually a transient failure of cloud-init's WSL datasource; "
-            f"run `wslx delete {name}` and create it again."
+            "This is a transient failure of cloud-init's WSL datasource. Run "
+            f"`wslx delete {name}` and create it again; the rootfs is cached, so "
+            "that is an import and not another download."
         )
+
+
+def _boot(name: str, error: str) -> None:
+    """Boot `name`, as root.
+
+    As root because on a first boot cloud-init has not created `box` yet, so
+    uid 1000 has no passwd entry to start a shell as — which is also why
+    DefaultUid must be pinned after this and not before: WSL would fail to
+    start the systemd user session, leaving cloud-init degraded and the
+    distribution unseeded.
+    """
+    _call("--distribution", name, "--user", "root", "--exec", "dbus-launch", "true", error=error)
+
+
+# Re-seeding in place was tried and dropped. `cloud-init clean --logs`, freeing
+# uid 1000 of the fallback `ubuntu` account and rebooting does make cloud-init
+# read the seed again — hostname, sudo rule and `box` all appear — but it does
+# not restore the machine wslx promises: `box` lands at uid 1001 because the
+# fallback's leftover groups shift the numbering, /etc/wsl.conf ends up with
+# every key duplicated from the second write_files pass, and DefaultUid is left
+# pointing at a uid nothing owns. The distribution fails the seed check anyway,
+# so the user deletes it regardless, just later and after a murkier failure.
+# Deleting and re-creating is deterministic and, with the rootfs cached, costs
+# an import rather than a download.
 
 
 def seeded(name: str) -> bool:
