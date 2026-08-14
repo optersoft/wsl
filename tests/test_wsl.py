@@ -71,6 +71,27 @@ def test_parse_verbose_ignores_the_english_no_distributions_message() -> None:
     assert parse_verbose(output) == []
 
 
+def test_start_pins_the_default_user_before_booting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WSL binds DefaultUid when the instance launches, so the order matters.
+
+    Booting first leaves the running instance as root however correct the
+    registry value is — `wsl -d <name> -- whoami` answered `root` on a CI
+    runner with DefaultUid already set to 1000.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(wsl, "_require_windows", lambda: None)
+    monkeypatch.setattr(wsl, "running", lambda name: False)
+    monkeypatch.setattr(wsl, "registered", lambda name: True)
+    monkeypatch.setattr(wsl, "set_default_uid", lambda name, uid: calls.append(f"uid={uid}"))
+    monkeypatch.setattr(wsl, "_call", lambda *args, error: calls.append(" ".join(args)))
+
+    wsl.start("alfa")
+
+    assert calls[0] == f"uid={wsl.BOX_UID}"
+    # ... and the boot itself must not depend on that user existing yet.
+    assert calls[1] == "--distribution alfa --user root --exec dbus-launch true"
+
+
 def test_registered_matches_whole_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """`dev2` must not make `dev` look registered (the Rust port used substrings)."""
     monkeypatch.setattr(wsl, "_capture", lambda *args: "dev2\nUbuntu\n")
