@@ -26,9 +26,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ddemingo/wsl"
-Repository = "https://github.com/ddemingo/wsl"
-Issues = "https://github.com/ddemingo/wsl/issues"
+Homepage = "https://github.com/optersoft/wsl"
+Repository = "https://github.com/optersoft/wsl"
+Issues = "https://github.com/optersoft/wsl/issues"
 
 [project.scripts]
 wslx = "wslx.cli:main"

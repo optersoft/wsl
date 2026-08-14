@@ -5,7 +5,7 @@
 # https://pypi.org/manage/account/publishing/ with:
 #
 #   provider    GitHub
-#   owner       ddemingo
+#   owner       optersoft
 #   repository  wsl
 #   workflow    ci.yml
 #   env         pypi   (optional; must match the `environment:` below if set)
