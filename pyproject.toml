@@ -33,8 +33,8 @@ dependencies = [
 # Homepage points there, and the repository is a separate link.
 Homepage = "https://academy.optersoft.com/windows/wsl"
 Documentation = "https://academy.optersoft.com/windows/wsl"
-Repository = "https://code.optersoft.com/wsl"
-Issues = "https://code.optersoft.com/wsl/issues"
+Repository = "https://gitlab.com/optersoft/wsl"
+Issues = "https://gitlab.com/optersoft/wsl/-/issues"
 
 [project.scripts]
 wslx = "wslx.cli:main"

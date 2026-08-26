@@ -1,0 +1,192 @@
+# Test on every push; build and publish to PyPI on a version tag.
+#
+# Ported from .github/workflows/ci.yml on 2026-08-26, when this repo moved to
+# gitlab.com/optersoft/wsl. The GitHub workflow was deleted in the same commit —
+# off GitHub it could only ever be dead weight that looked like working CI.
+#
+# Publishing uses PyPI trusted publishing (OIDC) — no token is stored anywhere.
+# uv 0.10.7 speaks GitLab CI natively (`GitLabTokenClaims`), so `uv publish
+# --trusted-publishing always` needs nothing but the `id_tokens:` block below.
+#
+# ⚠ It needs a publisher registered at
+# https://pypi.org/manage/account/publishing/ under the **GitLab** provider — the
+# old GitHub registration does NOT carry over, and until this is done the publish
+# job fails and a release is a manual `uv publish` with an API token:
+#
+#   namespace                optersoft
+#   project                  wsl
+#   top-level pipeline file  .gitlab-ci.yml
+#   environment              pypi   (must match the `environment:` below)
+#
+# Release: `git tag -a v0.1.2 -m … && git push origin v0.1.2`, with the tag
+# matching the `version` in pyproject.toml.
+
+stages:
+  - test
+  - publish
+
+variables:
+  UV_VERSION: "0.10.7"
+  PYTHON_VERSION: "3.12"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+
+# ⚠ No `default: image:` here, unlike the sibling repos. The `windows` job runs on
+# a GitLab hosted Windows runner, which has **no Docker executor at all** — it
+# runs PowerShell directly on a throwaway VM, so `image:` is not merely wrong for
+# it but unusable. Hence the `.linux` template rather than a global default.
+
+.linux:
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-bookworm-slim
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - .uv-cache
+  after_script:
+    - uv cache prune --ci
+
+.on_test_refs:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:
+  extends:
+    - .linux
+    - .on_test_refs
+  stage: test
+  script:
+    - uv sync --all-groups --frozen
+    - uv run ruff check
+    - uv run ruff format --check .
+    - uv run pytest -q
+
+# Everything in `test` runs on Linux, where the whole Windows half of wslx is
+# skipped. This job is the only thing that executes `wsl --import`, the winreg
+# DefaultUid write and the cloud-init seeding for real.
+#
+# ⚠ THIS JOB IS `allow_failure: true`, AND THAT IS A REAL LOSS OF COVERAGE.
+# On GitHub it gated `publish`: no release happened unless the Windows half
+# passed. GitLab's hosted Windows runners do exist (tag
+# `saas-windows-medium-amd64`, Windows Server 2022, available from the Free tier,
+# still marked Beta), but **nested virtualization is nowhere in GitLab's docs for
+# them** — they are GCP VMs, where nested virt is opt-in per instance — and WSL2
+# cannot start without it. The GitHub runners only gained it in the Dadsv5 move
+# of January 2024, which is why this worked there.
+#
+# So this is deliberately non-blocking until a pipeline proves it works. Once one
+# does: delete `allow_failure`, and the release gate is back. If it turns out
+# nested virt is unavailable, the honest fix is to drop this job and run the
+# Windows suite somewhere that has it (an Isard Windows desktop — see the `isard`
+# skill), not to leave a permanently-red job here.
+windows:
+  stage: test
+  extends: .on_test_refs
+  tags:
+    - saas-windows-medium-amd64
+  allow_failure: true
+  variables:
+    # wsl.exe writes UTF-16LE without this, which the output parsers then have
+    # to guess their way out of.
+    WSL_UTF8: "1"
+  before_script:
+    - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    - powershell -Command "irm https://astral.sh/uv/$env:UV_VERSION/install.ps1 | iex"
+    - uv python install $env:PYTHON_VERSION
+    - uv sync --all-groups --frozen
+  script:
+    - uv run pytest -q
+
+    # A fresh runner has no distribution registered, so `wsl --list --verbose`
+    # prints prose and exits non-zero. That is exactly the input that used to
+    # yield a bogus row, so assert the empty case before creating anything.
+    - |
+      $out = uv run wslx list 2>&1 | Out-String
+      Write-Host $out
+      if ($out -notmatch 'No WSL distributions registered') {
+        throw "expected the empty-list message, got: $out"
+      }
+
+    - |
+      uv run wslx create ci
+      if ($LASTEXITCODE -ne 0) { throw "wslx create failed" }
+      uv run wslx start ci
+      if ($LASTEXITCODE -ne 0) { throw "wslx start failed" }
+
+      # cloud-init is what creates the box user and sets the hostname, and it
+      # only runs under systemd. Checking PID 1 first turns "the seeding
+      # silently did nothing" into a named failure instead of three confusing
+      # ones.
+      $init = (wsl.exe -d ci -u root -- ps -p 1 -o comm=).Trim()
+      if ($init -ne 'systemd') { throw "PID 1 is '$init', not systemd — cloud-init cannot run" }
+
+      # Wait for cloud-init but do not gate on its exit code: DataSourceWSL
+      # intermittently reports `no local data found` and falls back, which exits
+      # non-zero while still saying "status: done". What the seeding was for is
+      # asserted below, and that is the real gate.
+      wsl.exe -d ci -u root -- cloud-init status --wait
+      Write-Host "cloud-init exit: $LASTEXITCODE"
+
+      $hostname = (wsl.exe -d ci -u root -- hostname).Trim()
+      if ($hostname -ne 'ci') { throw "hostname is '$hostname', expected 'ci'" }
+
+      # The Noble image's own `ubuntu` account is cloud-init's default user, so
+      # uid 1000 resolving to `box` is what proves the wslx seed was consumed
+      # rather than the built-in fallback.
+      $owner = (wsl.exe -d ci -u root -- id -un 1000).Trim()
+      if ($owner -ne 'box') { throw "uid 1000 is '$owner', expected 'box' — the cloud-init seed was not applied" }
+
+      wsl.exe -d ci -u box -- sudo -n true
+      if ($LASTEXITCODE -ne 0) { throw "box does not have passwordless sudo" }
+
+      # `start` pins DefaultUid, but WSL binds it when an instance launches, so
+      # it applies from the next launch — which is also the first moment `box`
+      # exists. Terminate, then check.
+      wsl.exe --terminate ci
+      $who = (wsl.exe -d ci -- whoami).Trim()
+      if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
+
+    - |
+      $out = uv run wslx list 2>&1 | Out-String
+      Write-Host $out
+      if ($out -notmatch '(?m)^\|\s*ci\b.*\|\s*2\s*\|\s*yes\s*\|') {
+        throw "expected ci listed as a managed version-2 distribution, got: $out"
+      }
+
+      uv run wslx stop ci
+      if ($LASTEXITCODE -ne 0) { throw "wslx stop failed" }
+
+      uv run wslx delete ci
+      if ($LASTEXITCODE -ne 0) { throw "wslx delete failed" }
+
+      # delete must take the disk and the cloud-init seed with it.
+      if (Test-Path "$env:APPDATA\wslx\ci") { throw "instance directory survived delete" }
+      if (Test-Path "$env:USERPROFILE\.cloud-init\ci.user-data") { throw "cloud-init seed survived delete" }
+
+publish:
+  stage: publish
+  extends: .linux
+  # Keeps the GitHub ordering (`needs: [test, windows]`). Because `windows` is
+  # allow_failure, this runs once it finishes either way — see the warning above.
+  needs:
+    - test
+    - windows
+  environment: pypi
+  id_tokens:
+    # uv discovers the ambient token by its `*_ID_TOKEN` name; `aud` must be the
+    # audience PyPI advertises at /_/oidc/audience, which is `pypi`.
+    PYPI_ID_TOKEN:
+      aud: pypi
+  rules:
+    # Tags only — the GitHub original gated on refs/tags/v, and a branch build
+    # must never be able to reach PyPI.
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  cache: {}
+  script:
+    - uv build
+    # Catch a wheel that is missing files before it reaches PyPI.
+    - uv run --isolated --no-project --with dist/*.whl -- wslx --version
+    - uv run --isolated --no-project --with dist/*.tar.gz -- wslx --version
+    - uv publish --trusted-publishing always
