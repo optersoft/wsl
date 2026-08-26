@@ -36,7 +36,7 @@ variables:
 # it but unusable. Hence the `.linux` template rather than a global default.
 
 .linux:
-  image: python:$PYTHON_VERSION-bookworm-slim
+  image: python:$PYTHON_VERSION-slim-bookworm
   before_script:
     # ⚠ NOT ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-bookworm-slim.
     # Astral stopped publishing the version+python combined image tags after
