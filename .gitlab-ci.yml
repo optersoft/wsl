@@ -36,7 +36,15 @@ variables:
 # it but unusable. Hence the `.linux` template rather than a global default.
 
 .linux:
-  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-bookworm-slim
+  image: python:$PYTHON_VERSION-bookworm-slim
+  before_script:
+    # ⚠ NOT ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-bookworm-slim.
+    # Astral stopped publishing the version+python combined image tags after
+    # 0.9.x — `0.10.7-python3.12-bookworm-slim` is a 404, and the runner reports
+    # that as a bare `manifest unknown`, which reads like a broken registry
+    # rather than a tag that was never built. Installing uv from PyPI pins the
+    # exact version the way `setup-uv`'s `version:` did on GitHub.
+    - pip install --quiet --disable-pip-version-check "uv==$UV_VERSION"
   cache:
     key:
       files:
