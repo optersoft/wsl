@@ -72,29 +72,16 @@ test:
     - uv run pytest -q
 
 # Everything in `test` runs on Linux, where the whole Windows half of wslx is
-# skipped. This job is the only thing that executes `wsl --import`, the winreg
-# DefaultUid write and the cloud-init seeding for real.
+# skipped. This job is what actually exercises the Windows code paths.
 #
-# ⚠ THIS JOB IS `allow_failure: true`, AND THAT IS A REAL LOSS OF COVERAGE.
-# On GitHub it gated `publish`: no release happened unless the Windows half
-# passed. GitLab's hosted Windows runners do exist (tag
-# `saas-windows-medium-amd64`, Windows Server 2022, available from the Free tier,
-# still marked Beta), but **nested virtualization is nowhere in GitLab's docs for
-# them** — they are GCP VMs, where nested virt is opt-in per instance — and WSL2
-# cannot start without it. The GitHub runners only gained it in the Dadsv5 move
-# of January 2024, which is why this worked there.
-#
-# So this is deliberately non-blocking until a pipeline proves it works. Once one
-# does: delete `allow_failure`, and the release gate is back. If it turns out
-# nested virt is unavailable, the honest fix is to drop this job and run the
-# Windows suite somewhere that has it (an Isard Windows desktop — see the `isard`
-# skill), not to leave a permanently-red job here.
+# ⚠ It runs the UNIT tests only. The live suite — `wsl --import`, the winreg
+# DefaultUid write, cloud-init seeding — is in `windows-integration` below and is
+# manual, because it CANNOT pass on a GitLab hosted runner. See that job.
 windows:
   stage: test
   extends: .on_test_refs
   tags:
     - saas-windows-medium-amd64
-  allow_failure: true
   variables:
     # wsl.exe writes UTF-16LE without this, which the output parsers then have
     # to guess their way out of.
@@ -107,9 +94,39 @@ windows:
   script:
     - uv run pytest -q
 
-    # A fresh runner has no distribution registered, so `wsl --list --verbose`
-    # prints prose and exits non-zero. That is exactly the input that used to
-    # yield a bogus row, so assert the empty case before creating anything.
+# The live WSL suite. MANUAL, and it will fail on GitLab's hosted runners —
+# keeping it non-manual would mean a permanently-red pipeline that everyone
+# learns to ignore.
+#
+# ⚠ Verified empirically on 2026-08-26 (job 16129794778): the hosted
+# `saas-windows-medium-amd64` image is Windows Server 2022 with the WSL optional
+# feature NOT installed, so `wsl.exe --import` prints its usage text instead of
+# importing — and `wsl --install` cannot fix that, because WSL2 needs nested
+# virtualization, which GitLab documents nowhere for these runners (they are GCP
+# VMs, where nested virt is opt-in per instance). WSL1 would not help: this suite
+# asserts version 2, systemd as PID 1, and cloud-init.
+#
+# On GitHub this ran for real and gated the release — Actions' Windows runners
+# gained nested virt in the Dadsv5 move of January 2024. That gate is GONE, and
+# `windows` above (unit tests) is what replaces it.
+#
+# To get it back, run this against a Windows box that has WSL2: add that runner's
+# tag here and drop `when: manual`. An Isard Windows desktop is the fleet's
+# nested-virt-capable option — see the `isard` skill.
+windows-integration:
+  stage: test
+  tags:
+    - saas-windows-medium-amd64
+  when: manual
+  allow_failure: true
+  variables:
+    WSL_UTF8: "1"
+  before_script:
+    - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    - powershell -Command "irm https://astral.sh/uv/$env:UV_VERSION/install.ps1 | iex"
+    - uv python install $env:PYTHON_VERSION
+    - uv sync --all-groups --frozen
+  script:
     - |
       $out = uv run wslx list 2>&1 | Out-String
       Write-Host $out
@@ -176,8 +193,9 @@ windows:
 publish:
   stage: publish
   extends: .linux
-  # Keeps the GitHub ordering (`needs: [test, windows]`). Because `windows` is
-  # allow_failure, this runs once it finishes either way — see the warning above.
+  # Both are blocking, as on GitHub. `windows-integration` is deliberately NOT
+  # here: it is manual and cannot pass on these runners, so requiring it would
+  # mean no release could ever happen.
   needs:
     - test
     - windows
