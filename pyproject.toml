@@ -28,6 +28,11 @@ dependencies = [
     "typer>=0.12",
 ]
 
+# The window is an extra, not a dependency: wxPython is a ~20 MB C extension
+# and most of the people who install wslx will only ever type at it.
+[project.optional-dependencies]
+gui = ["wxpython>=4.2.2"]
+
 [project.urls]
 # The instructions and the tutorial live on academy, not in the README -- so
 # Homepage points there, and the repository is a separate link.
@@ -47,6 +52,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "wxpython>=4.2.2",
 ]
 
 [tool.ruff]
