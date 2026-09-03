@@ -334,7 +334,6 @@ gui = [
 dev = [
     { name = "pytest" },
     { name = "ruff" },
-    { name = "wxpython" },
 ]
 
 [package.metadata]
@@ -350,7 +349,6 @@ provides-extras = ["gui"]
 dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "wxpython", specifier = ">=4.2.2" },
 ]
 
 [[package]]

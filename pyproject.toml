@@ -49,10 +49,14 @@ requires = ["uv_build>=0.10.7,<0.11.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# wxPython is deliberately NOT here. It publishes wheels for Windows and macOS
+# only, so a `uv sync --all-groups` on Linux — which is what CI does, and what
+# a contributor on a Linux box does — would try to build a 64 MB sdist against
+# GTK headers. It is the `gui` extra and nothing else: `uv sync --extra gui` to
+# work on the window.
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
-    "wxpython>=4.2.2",
 ]
 
 [tool.ruff]
