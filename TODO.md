@@ -15,14 +15,13 @@
       `windows` desktop; see `Shipped` below.
 - [ ] `wslx gui` has no icon and no `.ico`, so the window shows wxPython's
       default. Fine for now, wrong for a screenshot on the academy page.
-- [ ] `[human]` **CI cannot run a client Windows.** GitHub hosts Server images
-      only, so `windows-2022` / `windows-2025` stand in for the Windows 10 and
-      11 codebases. Three things therefore stay desktop-only: an interactive UAC
-      prompt (a runner is already elevated, so `compact` and `forward add`
-      never raise one there), a Windows edition with no Hyper-V — where
-      `compact` must fall back to diskpart, which is the path a student's Home
-      laptop takes — and a real USB bus. If that matters more later, a
-      self-hosted runner on the Isard desktop is the only way to get it.
+- [ ] `[human]` **CI cannot run a client Windows**, and three things therefore
+      stay desktop-only: an interactive UAC prompt (a runner is already
+      elevated, so `compact` and `forward add` never raise one there), a
+      Windows edition with no Hyper-V — where `compact` must fall back to
+      diskpart, the path a student's Home laptop takes — and a real USB bus.
+      A self-hosted runner on the Isard desktop is the only way to get those.
+      Everything else does run on both images; see below.
 - [ ] Release 0.2.0 once the above two are settled — the version in `pyproject`
       is still 0.1.1, and PyPI's 0.1.1 metadata links `/tool/wsl` (see below).
 
@@ -45,6 +44,20 @@
 
 ## Shipped
 
+- 2026-09-03 · **The full live suite runs on both GitHub images.** There is no
+  Windows 10 or 11 runner — only Server — so the matrix is `windows-2022`
+  (build 20348, the Win10 21H2 codebase) and `windows-2025` (build 26100, the
+  Win11 24H2 codebase). 2022 ships the inbox `wsl.exe`, but **both optional
+  features are already enabled on that image**, so installing the WSL MSI
+  in-job brings up 2.7.11 with kernel 6.18 and **no restart** — which the fleet
+  notes said was impossible. A skip on either image is now a hard failure.
+- 2026-09-03 · That runner found a bug nothing else could: its
+  `wsl --status` default version is **1**, and `wslx create` did not pass
+  `--version 2`, so it built a WSL 1 machine — no systemd, no cloud-init, no
+  box user — and said nothing, because a WSL 1 distribution has no `ext4.vhdx`
+  so `managed` returned False and the seed check never fired. CI deliberately
+  leaves that default at 1 and asserts the import was version 2 from the
+  registry; it is the only place this reproduces.
 - 2026-09-03 · Verified end to end on the Isard `windows` desktop (Windows 10
   22H2, Spanish, WSL 2.7.11): 39 of 40 steps green on the first run, then all of
   them. Run as a scheduled task with `RunLevel Highest`, which is what makes the
