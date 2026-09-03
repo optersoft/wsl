@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import __version__, backup, config, integrations, network, scheduler, wsl, wslconf
@@ -90,7 +91,9 @@ def list_() -> None:
     table.add_column("Managed")
 
     for distribution in distributions:
-        name = f"{distribution.name} *" if distribution.default else distribution.name
+        # Escaped for the same reason `fail` escapes: the name came from
+        # `wsl --list`, and whoever registered it chose it, not us.
+        name = escape(distribution.name) + (" *" if distribution.default else "")
         managed = "yes" if wsl.managed(distribution.name) else "no"
         table.add_row(name, distribution.state, distribution.version, managed)
 
@@ -435,12 +438,24 @@ def gui() -> None:
     launch()
 
 
+def fail(message: str) -> None:
+    """Print an error the way the user should read it.
+
+    `escape` is load-bearing. Rich treats square brackets as markup, so the
+    advice to install `wslx[gui]` printed as "install wslx" — the one word that
+    made it wrong — and a distribution named `a[b]` would vanish the same way.
+    Anything that reaches here came from a machine or a person, not from us, so
+    none of it is markup.
+    """
+    errors.print(f"[red]error:[/red] {escape(message)}")
+
+
 def main() -> None:
     """Console-script entry point: turn `WslError` into a tidy exit."""
     try:
         app()
     except WslError as err:
-        errors.print(f"[red]error:[/red] {err}")
+        fail(str(err))
         raise SystemExit(1) from err
 
 

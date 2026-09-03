@@ -471,6 +471,11 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv build
       # Catch a wheel that is missing files before it reaches PyPI.
-      - run: uv run --isolated --no-project --with dist/*.whl -- wslx --version
-      - run: uv run --isolated --no-project --with dist/*.tar.gz -- wslx --version
+      #
+      # `--no-cache` is not belt and braces. uv keys a local wheel's unpacked
+      # archive on its version, so rebuilding the same version and re-running
+      # this silently tests the *previous* build — which is exactly how a
+      # broken `wslx gui` message survived two rounds of local checking.
+      - run: uv run --isolated --no-project --no-cache --with dist/*.whl -- wslx --version
+      - run: uv run --isolated --no-project --no-cache --with dist/*.tar.gz -- wslx --version
       - run: uv publish --trusted-publishing always

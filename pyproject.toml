@@ -1,6 +1,6 @@
 [project]
 name = "wslx"
-version = "0.1.1"
+version = "0.2.0"
 description = "Manage Ubuntu WSL virtual machines from the command line"
 readme = "README.md"
 # Dual, at the user's choice -- the same pair `make` and `uv` ship under. MIT is

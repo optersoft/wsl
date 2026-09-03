@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from wslx import wsl
+from wslx import cli, wsl
 from wslx.cli import app
 
 runner = CliRunner()
@@ -61,3 +61,20 @@ def test_connect_forwards_the_new_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert runner.invoke(app, ["connect", "alfa", "--new"]).exit_code == 0
     assert runner.invoke(app, ["connect", "alfa"]).exit_code == 0
     assert calls == [("alfa", True), ("alfa", False)]
+
+
+def test_errors_do_not_lose_square_brackets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rich reads `[gui]` as markup, which turned the fix into the wrong advice.
+
+    `wslx gui` without wxPython installed tells you to install `wslx[gui]`.
+    Printed through rich unescaped, that reached the user as "install wslx" —
+    advice that reinstalls exactly what they already have.
+    """
+    from io import StringIO  # noqa: PLC0415 - only this test needs it
+
+    from rich.console import Console  # noqa: PLC0415
+
+    buffer = StringIO()
+    monkeypatch.setattr(cli, "errors", Console(file=buffer, width=200))
+    cli.fail('install it with `uv tool install "wslx[gui]"`')
+    assert "wslx[gui]" in buffer.getvalue()
