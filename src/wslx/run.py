@@ -60,6 +60,18 @@ class Result:
         text = self.err.strip() or self.out.strip()
         return text.splitlines()[0] if text else f"exit code {self.code}"
 
+    @property
+    def tail(self) -> str:
+        """The *last* few lines instead of the first.
+
+        For the programs that greet you before they fail. diskpart's first line
+        is its version banner, so `message` reports a version number as the
+        reason a disk could not be compacted — which is how a real failure
+        reads as a bug in wslx.
+        """
+        text = (self.err.strip() or self.out.strip()).splitlines()
+        return " / ".join(line.strip() for line in text[-3:] if line.strip())
+
 
 def windows() -> bool:
     return sys.platform == "win32"
@@ -204,8 +216,13 @@ def script_text(commands: list[list[str]], log: Path) -> str:
     function in wslx whose output a shell parses, so it is the one that has to
     be right about a name like `a & shutdown /r`. `list2cmdline` quotes each
     argument, and cmd.exe's parser then sees the `&` inside quotes as text.
+
+    No `chcp` here, deliberately. Forcing the console to UTF-8 so the log came
+    back decodable also changes the environment of whatever runs next, and
+    diskpart is one of the programs that does not survive it. `decode` already
+    falls back to the console code page, so the log needs no help.
     """
-    lines = ["@echo off", "chcp 65001 > nul"]
+    lines = ["@echo off"]
     for command in commands:
         lines.append(f'{subprocess.list2cmdline(command)} >> "{log}" 2>&1')
     return "\r\n".join(lines) + "\r\n"

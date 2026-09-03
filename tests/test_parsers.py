@@ -259,9 +259,21 @@ def test_elevated_script_keeps_the_commands_in_order_and_logs_each() -> None:
     assert lines == ['netsh a >> "C:\\log" 2>&1', 'netsh b >> "C:\\log" 2>&1']
 
 
+def test_elevated_script_does_not_force_a_codepage() -> None:
+    """diskpart does not survive `chcp 65001`, and the log does not need it."""
+    assert "chcp" not in run.script_text([["diskpart", "/s", "x"]], Path("C:\\log"))
+
+
 def test_command_for_names_the_box_user_only_when_wslx_made_the_machine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`-u box` on someone else's Ubuntu is a task that fails every night."""
     assert " -u box " in scheduler.command_for("alfa", "uptime", user="box")
     assert " -u " not in scheduler.command_for("Ubuntu", "uptime")
+
+
+def test_result_tail_is_for_programs_that_greet_you_before_failing() -> None:
+    """diskpart's first line is its version, so `message` would report that."""
+    result = run.Result(1, "Microsoft DiskPart 10.0\n\nThe disk is in use.\n", "")
+    assert result.message.startswith("Microsoft DiskPart")
+    assert result.tail.endswith("The disk is in use.")

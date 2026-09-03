@@ -20,6 +20,8 @@ Only the last two need administrator rights, and both say so before asking.
 from __future__ import annotations
 
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from . import info, registry, report, wsl
@@ -184,7 +186,7 @@ def compact(name: str) -> int:
     report.say(f"{name}: compacting {info.human(before)} (administrator permission required) ...")
     reasons = []
     for attempt in (_optimize_vhd, _diskpart_compact):
-        ok, reason = attempt(disk)
+        ok, reason = _retry(attempt, disk)
         if ok:
             break
         reasons.append(reason)
@@ -194,6 +196,25 @@ def compact(name: str) -> int:
     saved = before - disk.stat().st_size
     report.say(f"{name}: recovered {info.human(max(saved, 0))}")
     return saved
+
+
+def _retry(attempt: Callable[[Path], tuple[bool, str]], disk: Path) -> tuple[bool, str]:
+    """Try a compaction strategy a few times, a few seconds apart.
+
+    `wsl --shutdown` returns before the virtual machine has actually let go of
+    the disk, and the failure that follows is indistinguishable from "this
+    strategy does not work here": diskpart attaches the VHDX, is told the file
+    is in use, and exits. Observed on Windows 10 22H2 — the same diskpart
+    script run by hand a couple of seconds later compacts the disk fine.
+    """
+    reason = ""
+    for delay in (0, 3, 8):
+        if delay:
+            time.sleep(delay)
+        ok, reason = attempt(disk)
+        if ok:
+            return True, reason
+    return False, reason
 
 
 def _optimize_vhd(disk: Path) -> tuple[bool, str]:
@@ -232,7 +253,7 @@ def _diskpart_compact(disk: Path) -> tuple[bool, str]:
             result = elevate_script([["diskpart", "/s", str(script)]])
         except RunError as exc:
             return False, f"diskpart could not be run: {exc}"
-        return result.ok, f"diskpart said: {result.message}"
+        return result.ok, f"diskpart said: {result.tail or result.message}"
 
 
 def _detach(name: str) -> None:
