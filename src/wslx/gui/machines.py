@@ -163,6 +163,7 @@ class MachinesPanel(wx.Panel):
             return
         menu = wx.Menu()
         entries = [
+            ("Details ...", self.on_details),
             ("Set as default", self.on_default),
             ("Clone ...", self.on_clone),
             (None, None),
@@ -183,6 +184,50 @@ class MachinesPanel(wx.Panel):
             self.Bind(wx.EVT_MENU, handler, item)
         self.PopupMenu(menu)
         menu.Destroy()
+
+    def on_details(self, event: wx.Event) -> None:
+        """The rest of what `wslx info` prints.
+
+        The columns hold what you compare between machines; this holds what you
+        only want about one of them — where its disk is, what release it turned
+        out to be, which uid a session opens as.
+        """
+        name = self.selected
+        if not name:
+            return
+        self.frame.worker.submit(
+            f"Reading {name}",
+            lambda: info.info(name, inside=True),
+            done=self._show_details,
+        )
+
+    def _show_details(self, detail: info.Info) -> None:
+        rows = [
+            ("Name", detail.name + (" (default)" if detail.default else "")),
+            ("State", "Running" if detail.running else "Stopped"),
+            ("WSL version", str(detail.version)),
+            ("Managed by wslx", "yes" if detail.managed else "no"),
+            ("From the Store", "yes" if detail.from_store else "no"),
+            ("Release", detail.release or "(only a running machine can say)"),
+            ("Address", detail.address or "-"),
+            ("Disk", str(detail.vhdx) if detail.vhdx else "-"),
+            (
+                "Disk size",
+                f"{info.human(detail.vhdx_size)}"
+                + ("" if detail.sparse else "  (not sparse: it only ever grows)"),
+            ),
+            (
+                "Used inside",
+                f"{info.human(detail.usage.used)} of {info.human(detail.usage.total)} "
+                f"({detail.usage.percent}%)"
+                if detail.usage
+                else "-",
+            ),
+            ("Default user id", str(detail.default_uid)),
+        ]
+        text = "\n".join(f"{label:<18}{value}" for label, value in rows)
+        with wx.MessageDialog(self, text, detail.name, wx.OK | wx.ICON_INFORMATION) as dialog:
+            dialog.ShowModal()
 
     def on_default(self, event: wx.Event) -> None:
         if name := self.selected:
