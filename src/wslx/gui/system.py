@@ -298,9 +298,7 @@ class DisksPanel(_Tab):
         partition = ask(self, "Which partition? (empty for the whole disk)", "Mount", "1")
         self.frame.worker.submit(
             f"Mounting {disk.device}",
-            lambda: mount.mount(
-                disk.device, partition=int(partition) if partition else None
-            ),
+            lambda: mount.mount(disk.device, partition=int(partition) if partition else None),
             done=self._mounted,
         )
 

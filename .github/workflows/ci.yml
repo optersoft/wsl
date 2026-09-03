@@ -20,6 +20,7 @@ on:
     branches: [main]
     tags: ["v*.*.*"]
   pull_request:
+  workflow_dispatch:
 
 env:
   UV_VERSION: "0.10.7"
@@ -36,6 +37,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
+      # No `--extra gui` here: wxPython publishes wheels for Windows and macOS
+      # only, so asking for it on Linux builds a 64 MB sdist against GTK.
       - run: uv sync --all-groups --frozen
       - run: uv run ruff check
       - run: uv run ruff format --check .
@@ -43,11 +46,37 @@ jobs:
 
   # Everything above runs on Linux, where the whole Windows half of wslx is
   # skipped. This job is the only thing that executes `wsl --import`, the
-  # winreg DefaultUid write and the cloud-init seeding for real. The runner
-  # image ships WSL2 as default (nested virtualization has been available on
-  # GitHub's Windows runners since the Dadsv5 move in January 2024).
+  # winreg DefaultUid write, the cloud-init seeding, netsh, schtasks and
+  # diskpart for real.
+  #
+  # ⚠️ There is no Windows 10 or Windows 11 runner. GitHub hosts Windows
+  # *Server* images only, so the matrix below is the closest thing available
+  # and is labelled for what it actually is:
+  #
+  #   windows-2022  Server 2022, build 20348 — the Windows 10 21H2 codebase
+  #   windows-2025  Server 2025, build 26100 — the Windows 11 24H2 codebase
+  #
+  # (`windows-2019` was retired in June 2025, and `windows-latest` is 2025.)
+  # The pair is worth running because the two differ in exactly the places
+  # wslx touches: which `wsl.exe` the image ships — and therefore whether
+  # `--manage`, `--set-sparse` and systemd exist at all — and whether Hyper-V's
+  # `Optimize-VHD` is present, which decides whether `compact` takes the fast
+  # path or falls back to diskpart. Anything that depends on a *client* SKU
+  # (Windows Home having no Hyper-V, an interactive UAC prompt, a real USB bus)
+  # cannot be covered here and is tested on a desktop by hand.
   windows:
-    runs-on: windows-2025
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.image }}
+    strategy:
+      # One image failing must not cancel the other: which of the two broke is
+      # the whole information this matrix exists to produce.
+      fail-fast: false
+      matrix:
+        include:
+          - image: windows-2022
+            label: Windows 10 codebase (Server 2022)
+          - image: windows-2025
+            label: Windows 11 codebase (Server 2025)
     env:
       # wsl.exe writes UTF-16LE without this, which the output parsers then
       # have to guess their way out of.
@@ -60,14 +89,59 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - run: uv sync --all-groups --frozen
+      # `--extra gui` is not decoration: it is the only check that the wxPython
+      # wheel resolves for this Python on Windows, which is what `uv tool
+      # install "wslx[gui]"` will do on a user's machine.
+      - run: uv sync --all-groups --extra gui --frozen
+
+      # What this runner actually is. Printed rather than asserted, because the
+      # differences between the two images are the point — when a step below
+      # fails on one and passes on the other, this is the block that says why.
+      - name: what this runner is
+        id: probe
+        run: |
+          Write-Host "OS build:  $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Edition:   $((Get-CimInstance Win32_OperatingSystem).Caption)"
+          Write-Host "Elevated:  $(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          $optimize = [bool](Get-Command Optimize-VHD -ErrorAction SilentlyContinue)
+          Write-Host "Optimize-VHD (Hyper-V): $optimize"
+
+          # `wsl --version` predates nothing else: the inbox wsl.exe that ships
+          # with older images has no such flag, and an image with only that has
+          # no systemd either — so cloud-init cannot run and every seeded
+          # machine would come up wrong. That makes this the one honest test of
+          # whether the live suite can run at all.
+          # `throw`-proof: an image without wsl.exe at all must report "no",
+          # not fail the step before it can say so.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = ''
+          try { $version = (wsl.exe --version 2>&1 | Out-String).Trim() } catch { $version = "$_" }
+          Write-Host "wsl --version: $version"
+          $usable = ($LASTEXITCODE -eq 0) -and ($version -match 'WSL')
+          Write-Host "live WSL suite: $(if ($usable) { 'yes' } else { 'NO — modern wsl.exe absent' })"
+          "usable=$($usable.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $global:LASTEXITCODE = 0
+
       - run: uv run pytest -q
+
+      # The window is not opened here — there is no session to open it in — but
+      # importing it exercises the whole GUI package, which is what catches a
+      # typo in a panel that no test imports.
+      - name: the GUI package imports
+        run: uv run python -c "import wx; import wslx.gui; print('wxPython', wx.version())"
+
+      - name: the live suite cannot be skipped on the newer image
+        if: steps.probe.outputs.usable != 'true' && matrix.image == 'windows-2025'
+        run: |
+          throw "windows-2025 ships WSL2; if wsl --version does not answer, that is a regression in the image or in this job, not something to skip"
 
       # A fresh runner has no distribution registered, so `wsl --list
       # --verbose` prints prose and exits non-zero. That is exactly the input
       # that used to yield a bogus row, so assert the empty case before
       # creating anything.
       - name: list with no distributions registered
+        if: steps.probe.outputs.usable == 'true'
         run: |
           $out = uv run wslx list 2>&1 | Out-String
           Write-Host $out
@@ -76,6 +150,7 @@ jobs:
           }
 
       - name: create, seed and inspect a distribution
+        if: steps.probe.outputs.usable == 'true'
         run: |
           uv run wslx create ci
           if ($LASTEXITCODE -ne 0) { throw "wslx create failed" }
@@ -115,7 +190,159 @@ jobs:
           $who = (wsl.exe -d ci -- whoami).Trim()
           if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
 
+      - name: info reads the registry and the machine
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          uv run wslx start ci
+          $out = uv run wslx info ci 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "wslx info failed" }
+          # Each of these comes from a different place: the registry, the file
+          # system, and the distribution itself over `wsl --exec`.
+          if ($out -notmatch 'ext4\.vhdx') { throw "info found no disk — the Lxss lookup failed" }
+          if ($out -notmatch 'Ubuntu') { throw "info could not read /etc/os-release" }
+          if ($out -notmatch '\d+\.\d+\.\d+\.\d+') { throw "info could not read the address" }
+
+      # Backup, restore and clone. The assertion worth having is not that the
+      # files appear — it is that a restored machine opens as `box`, because
+      # `wsl --import` does not preserve the default user and putting that back
+      # is the one thing wslx adds to it.
+      - name: export, restore and clone
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          $tar = "$env:RUNNER_TEMP\ci.tar"
+          uv run wslx export ci $tar
+          if ($LASTEXITCODE -ne 0) { throw "wslx export failed" }
+          if (-not (Test-Path $tar)) { throw "export reported success but wrote no file" }
+          Write-Host "tarball: $([math]::Round((Get-Item $tar).Length / 1GB, 2)) GB"
+
+          uv run wslx restore ci-restored $tar
+          if ($LASTEXITCODE -ne 0) { throw "wslx restore failed" }
+          $who = (wsl.exe -d ci-restored -- whoami).Trim()
+          if ($who -ne 'box') { throw "the restored machine opens as '$who' — restore did not repin DefaultUid" }
+
+          uv run wslx clone ci ci-clone
+          if ($LASTEXITCODE -ne 0) { throw "wslx clone failed" }
+          $out = uv run wslx list 2>&1 | Out-String
+          Write-Host $out
+          foreach ($name in @('ci-restored', 'ci-clone')) {
+            if ($out -notmatch [regex]::Escape($name)) { throw "$name is not registered" }
+          }
+
+          uv run wslx delete ci-clone
+          uv run wslx delete ci-restored
+          Remove-Item $tar -Force
+
+      # netsh, twice: wslx's own listing and the actual system state, because
+      # a rule this tool can see and Windows cannot is the failure mode that
+      # matters. The firewall rule is half the feature and the half everyone
+      # forgets, so it is asserted separately.
+      - name: publish a port, with its firewall rule
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          uv run wslx start ci
+          uv run wslx forward add ci 18080 --inside 80
+          if ($LASTEXITCODE -ne 0) { throw "wslx forward add failed" }
+
+          $out = uv run wslx forward list 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch '18080') { throw "wslx does not list the rule it just made" }
+
+          $netsh = netsh interface portproxy show v4tov4 | Out-String
+          if ($netsh -notmatch '18080') { throw "netsh has no portproxy entry for 18080" }
+          $rule = netsh advfirewall firewall show rule name="wslx 18080" | Out-String
+          if ($rule -notmatch '18080') { throw "the firewall rule was not created" }
+
+          # Repair re-points a forward at the machine's current address, which
+          # is what makes it survive a WSL restart.
+          uv run wslx forward repair
+          if ($LASTEXITCODE -ne 0) { throw "wslx forward repair failed" }
+
+          uv run wslx forward remove 18080
+          if ($LASTEXITCODE -ne 0) { throw "wslx forward remove failed" }
+          $netsh = netsh interface portproxy show v4tov4 | Out-String
+          if ($netsh -match '18080') { throw "the portproxy entry survived remove" }
+          $global:LASTEXITCODE = 0
+
+      # The two operations that rewrite the disk, and the reason they are here:
+      # both were broken in a way only a real machine shows. `--terminate` does
+      # not detach the disk from the shared VM, so each of these has to shut
+      # WSL down first, and diskpart has to be retried while it lets go.
+      - name: compact and make the disk sparse
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          uv run wslx start ci
+          # Something to reclaim, or the compaction is measuring noise.
+          wsl.exe -d ci -u root -- sh -c "dd if=/dev/zero of=/big bs=1M count=800 status=none; sync; rm /big; sync"
+
+          $disk = "$env:APPDATA\wslx\ci\ext4.vhdx"
+          $before = (Get-Item $disk).Length
+          uv run wslx compact ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx compact failed" }
+          $after = (Get-Item $disk).Length
+          Write-Host "disk: $before -> $after bytes"
+          if ($after -gt $before) { throw "the disk grew" }
+
+          uv run wslx sparse ci
+          if ($LASTEXITCODE -ne 0) { throw "wslx sparse failed" }
+          $out = uv run wslx info ci 2>&1 | Out-String
+          if ($out -match 'not sparse') { throw "sparse reported success but info still says otherwise" }
+
+      # schtasks, and specifically the schedule: it is read from the task XML
+      # because schtasks translates its CSV, and on a localised Windows the
+      # column came back empty. An English runner cannot catch that regression,
+      # but it can catch the lookup breaking entirely.
+      - name: schedule a command
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          # pwsh 7.4 turns any non-zero native exit into a terminating error
+          # when $ErrorActionPreference is Stop, which is what the runner sets.
+          # The `schtasks /Query` below is *expected* to fail once the task is
+          # gone, so that behaviour has to be off in this step.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          uv run wslx task add ci-check ci "uptime" --at 09:00
+          if ($LASTEXITCODE -ne 0) { throw "wslx task add failed" }
+
+          schtasks /Query /TN "\wslx\ci-check" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Task Scheduler has no such task" }
+
+          $out = uv run wslx task list 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'ci-check') { throw "the task is not listed" }
+          if ($out -notmatch 'DAILY') { throw "the schedule column is empty — the XML trigger lookup broke" }
+
+          uv run wslx task remove ci-check
+          if ($LASTEXITCODE -ne 0) { throw "wslx task remove failed" }
+          schtasks /Query /TN "\wslx\ci-check" 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "the task survived remove" }
+          $global:LASTEXITCODE = 0
+
+      # The commands that have to behave when the thing they manage is absent.
+      # A runner has one disk and it is the boot disk, so the mountable list is
+      # correctly empty; usbipd-win is not installed, so `usb list` must
+      # explain that rather than produce a traceback.
+      - name: the empty and the missing
+        if: steps.probe.outputs.usable == 'true'
+        run: |
+          # `usb list` exits non-zero on purpose here — usbipd-win is absent.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          uv run wslx disks
+          if ($LASTEXITCODE -ne 0) { throw "wslx disks failed" }
+          uv run wslx vm
+          if ($LASTEXITCODE -ne 0) { throw "wslx vm failed" }
+
+          $out = uv run wslx usb list 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'usbipd') { throw "usb list should name usbipd-win as what is missing" }
+          if ($out -match 'Traceback') { throw "usb list raised instead of explaining" }
+          $global:LASTEXITCODE = 0
+
       - name: list, stop and delete
+        if: steps.probe.outputs.usable == 'true'
         run: |
           $out = uv run wslx list 2>&1 | Out-String
           Write-Host $out

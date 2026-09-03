@@ -162,6 +162,5 @@ def ask(parent: wx.Window, message: str, title: str, default: str = "") -> str |
 def confirm(parent: wx.Window, message: str, title: str) -> bool:
     """A yes/no the user has to mean — used before anything irreversible."""
     return (
-        wx.MessageBox(message, title, wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, parent)
-        == wx.YES
+        wx.MessageBox(message, title, wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, parent) == wx.YES
     )

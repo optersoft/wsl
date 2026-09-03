@@ -429,8 +429,8 @@ def gui() -> None:
         from .gui import launch  # noqa: PLC0415 - the GUI is an optional extra
     except ImportError as exc:  # pragma: no cover - depends on how wslx was installed
         raise WslError(
-            "the GUI needs wxPython — install it with `uv tool install \"wslx[gui]\"` "
-            "(or `pip install \"wslx[gui]\"`)"
+            'the GUI needs wxPython — install it with `uv tool install "wslx[gui]"` '
+            '(or `pip install "wslx[gui]"`)'
         ) from exc
     launch()
 

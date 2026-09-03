@@ -82,10 +82,13 @@ def vscode_installed() -> bool:
     if shutil.which("code") or shutil.which("code.cmd"):
         return True
     try:
-        return subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["cmd.exe", "/c", "code", "--version"],
-            capture_output=True,
-            check=False,
-        ).returncode == 0
+        return (
+            subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["cmd.exe", "/c", "code", "--version"],
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
     except OSError:
         return False

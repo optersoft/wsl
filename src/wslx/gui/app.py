@@ -30,9 +30,7 @@ class MainFrame(wx.Frame):
         self.log = wx.TextCtrl(
             splitter, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.BORDER_NONE
         )
-        self.log.SetFont(
-            wx.Font(wx.FontInfo(9).Family(wx.FONTFAMILY_TELETYPE))
-        )
+        self.log.SetFont(wx.Font(wx.FontInfo(9).Family(wx.FONTFAMILY_TELETYPE)))
         splitter.SplitHorizontally(self.notebook, self.log, -140)
         splitter.SetMinimumPaneSize(80)
 

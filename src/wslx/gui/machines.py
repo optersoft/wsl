@@ -70,8 +70,7 @@ class MachinesPanel(wx.Panel):
     @staticmethod
     def _collect() -> list[info.Info]:
         return [
-            info.info(distribution.name, inside=True)
-            for distribution in wsl.list_distributions()
+            info.info(distribution.name, inside=True) for distribution in wsl.list_distributions()
         ]
 
     def _show(self, rows: list[info.Info]) -> None:
