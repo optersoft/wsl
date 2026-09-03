@@ -168,8 +168,17 @@ def list_distributions() -> list[Distribution]:
 
 
 def managed(name: str) -> bool:
-    """Was `name` imported by wslx (i.e. does it own the instance directory)?"""
-    return (instance_dir(name) / "ext4.vhdx").is_file()
+    """Was `name` imported by wslx (i.e. does it own the instance directory)?
+
+    The disk is the primary signal — a WSL 2 distribution keeps its whole
+    filesystem in `ext4.vhdx` under our directory. The directory alone counts
+    too, because a WSL 1 distribution has no such file: without this a
+    distribution that came up as version 1 would read as somebody else's and
+    escape the seed check, which is exactly the failure that hid a WSL 1
+    import for as long as it hid.
+    """
+    directory = instance_dir(name)
+    return (directory / "ext4.vhdx").is_file() or directory.is_dir()
 
 
 def create(name: str) -> None:
@@ -188,11 +197,23 @@ def create(name: str) -> None:
     instance.mkdir(parents=True, exist_ok=True)
 
     report.say(f"{name}: importing WSL distribution ...")
+    # `--version 2` is not a default worth trusting. `wsl --import` uses
+    # whatever `wsl --set-default-version` last said, and on a machine where
+    # that is 1 the import quietly succeeds as a WSL 1 distribution — which has
+    # no systemd, so cloud-init never runs, so there is no box user, no
+    # hostname and no sudo rule. Worse, a WSL 1 distribution has no
+    # `ext4.vhdx`, so `managed` returns False and the seed check below is
+    # skipped: wslx would hand back a machine that is wrong in every way it
+    # promises to be right, and say nothing.
+    #
+    # Found by CI on a windows-2022 runner, whose default version is 1.
     _call(
         "--import",
         name,
         str(instance),
         str(image),
+        "--version",
+        "2",
         error=f"{name}: wsl --import failed",
     )
 

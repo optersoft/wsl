@@ -171,6 +171,14 @@ jobs:
             if ($LASTEXITCODE -eq 0) {
               "WSL_LIVE=yes" | Out-File -FilePath $env:GITHUB_ENV -Append
               Write-Host "the live suite will run on this image"
+              # Note what is NOT done here: `wsl --set-default-version 2`.
+              # This image's default is 1, and leaving it that way is the most
+              # valuable thing about it — `wslx create` has to force version 2
+              # on import, because a WSL 1 machine has no systemd, so
+              # cloud-init never runs and nothing wslx promises is true. That
+              # bug shipped until this runner caught it, and this is the only
+              # place it reproduces.
+              Write-Host "default version left as-is on purpose: $(wsl.exe --status | Out-String)"
             } else {
               Write-Host "modern wsl.exe installed but the VM platform needs a restart — live suite stays skipped"
             }
@@ -185,10 +193,14 @@ jobs:
       - name: the GUI package imports
         run: uv run python -c "import wx; import wslx.gui; print('wxPython', wx.version())"
 
-      - name: the live suite cannot be skipped on the newer image
-        if: env.WSL_LIVE != 'yes' && matrix.image == 'windows-2025'
+      # Every image has to run the whole suite. windows-2025 ships WSL2; the
+      # older image is given it by the step above, which works — so a skip on
+      # either one is a regression in the image, in the MSI URL, or in that
+      # step, and never something to pass over quietly.
+      - name: the live suite may not be skipped on any image
+        if: env.WSL_LIVE != 'yes'
         run: |
-          throw "windows-2025 ships WSL2; if wsl --version does not answer, that is a regression in the image or in this job, not something to skip"
+          throw "no usable WSL on ${{ matrix.image }} — the live suite must run on every image in the matrix, so this is a failure, not a skip"
 
       # A fresh runner has no distribution registered, so `wsl --list
       # --verbose` prints prose and exits non-zero. That is exactly the input
@@ -208,6 +220,17 @@ jobs:
         run: |
           uv run wslx create ci
           if ($LASTEXITCODE -ne 0) { throw "wslx create failed" }
+
+          # Version 2 regardless of what this machine's default is. Asserted
+          # from the registry rather than from `wsl -l -v`, whose columns are
+          # localised, and asserted before `start` because everything after it
+          # — systemd, cloud-init, the box user — depends on this being right.
+          $registered = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss\*' |
+            Where-Object { $_.DistributionName -eq 'ci' }
+          if ($registered.Version -ne 2) {
+            throw "ci was imported as WSL $($registered.Version) — create must pass --version 2"
+          }
+
           uv run wslx start ci
           if ($LASTEXITCODE -ne 0) { throw "wslx start failed" }
 
