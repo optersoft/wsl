@@ -165,7 +165,28 @@ def test_parse_tasks_keeps_only_the_wslx_folder() -> None:
     tasks = scheduler.parse_tasks(output)
     assert [task.label for task in tasks] == ["backup"]
     assert tasks[0].name == "\\wslx\\backup"
-    assert tasks[0].schedule == "DAILY"
+
+
+def test_parse_schedule_reads_the_xml_not_the_translated_table() -> None:
+    """On a Spanish Windows the CSV says `Diariamente`; the XML says this."""
+    xml = (
+        '<?xml version="1.0" encoding="UTF-16"?>'
+        '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+        "<Triggers><CalendarTrigger><StartBoundary>2026-09-04T09:00:00</StartBoundary>"
+        "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>"
+        "</CalendarTrigger></Triggers></Task>"
+    )
+    assert scheduler.parse_schedule(xml) == "DAILY"
+
+
+def test_parse_schedule_knows_the_triggers_that_are_not_calendars() -> None:
+    template = (
+        '<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+        "<Triggers><{tag}/></Triggers></Task>"
+    )
+    assert scheduler.parse_schedule(template.format(tag="LogonTrigger")) == "ONLOGON"
+    assert scheduler.parse_schedule(template.format(tag="BootTrigger")) == "ONSTART"
+    assert scheduler.parse_schedule("not xml at all") == ""
 
 
 @pytest.mark.parametrize("bad", ["one two", "..\\evil", 'quote"'])

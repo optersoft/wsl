@@ -134,12 +134,18 @@ def set_sparse(name: str, sparse: bool = True) -> None:
 
     A VHDX that is not sparse only grows. WSL calls this unsafe — hence
     `--allow-unsafe`, which it demands — because the conversion rewrites the
-    disk, so the distribution must be stopped and nothing else may hold it.
+    disk, so nothing may be holding it.
+
+    And `wslx stop` is not enough to reach that state, which is the part that
+    costs an afternoon: terminating a distribution leaves its disk **attached
+    to the virtual machine they all share**, so WSL refuses with "the VHD is
+    currently in use" and tells you to run `wsl.exe --shutdown`. Observed on
+    Windows 10 22H2 with WSL 2.7.11. So this shuts the whole thing down first,
+    and says so, because it stops everyone else's machines too.
     """
     wsl._require_windows()
     _registration(name)
-    if wsl.running(name):
-        wsl.stop(name)
+    _detach(name)
     value = "true" if sparse else "false"
     result = wsl.execute("--manage", name, "--set-sparse", value, "--allow-unsafe")
     if not result.ok:
@@ -167,30 +173,35 @@ def compact(name: str) -> int:
     if wsl.running(name):
         report.say(f"{name}: trimming the filesystem ...")
         wsl.execute("-d", name, "--user", "root", "--exec", "fstrim", "/")
-        wsl.stop(name)
+    _detach(name)
     before = disk.stat().st_size
 
     report.say(f"{name}: compacting {info.human(before)} (administrator permission required) ...")
-    if not _optimize_vhd(disk) and not _diskpart_compact(disk):
-        raise WslError(
-            f"{name}: could not compact the disk — neither Optimize-VHD nor diskpart ran"
-        )
+    reasons = []
+    for attempt in (_optimize_vhd, _diskpart_compact):
+        ok, reason = attempt(disk)
+        if ok:
+            break
+        reasons.append(reason)
+    else:
+        raise WslError(f"{name}: could not compact the disk — {'; '.join(reasons)}")
 
     saved = before - disk.stat().st_size
     report.say(f"{name}: recovered {info.human(max(saved, 0))}")
     return saved
 
 
-def _optimize_vhd(disk: Path) -> bool:
+def _optimize_vhd(disk: Path) -> tuple[bool, str]:
     """Hyper-V's compaction. Absent on Windows Home, so failure is expected."""
     if not powershell("Get-Command Optimize-VHD -ErrorAction SilentlyContinue").out.strip():
-        return False
+        return False, "Optimize-VHD is not available (it comes with Hyper-V)"
     script = f"Optimize-VHD -Path '{disk}' -Mode Full"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
-    return elevate_script([command]).ok
+    result = elevate_script([command])
+    return result.ok, f"Optimize-VHD said: {result.message}"
 
 
-def _diskpart_compact(disk: Path) -> bool:
+def _diskpart_compact(disk: Path) -> tuple[bool, str]:
     r"""diskpart's compaction, which every Windows has.
 
     diskpart reads a script rather than arguments, so it gets its own file:
@@ -213,9 +224,24 @@ def _diskpart_compact(disk: Path) -> bool:
             encoding="ascii",
         )
         try:
-            return elevate_script([["diskpart", "/s", str(script)]]).ok
-        except RunError:
-            return False
+            result = elevate_script([["diskpart", "/s", str(script)]])
+        except RunError as exc:
+            return False, f"diskpart could not be run: {exc}"
+        return result.ok, f"diskpart said: {result.message}"
+
+
+def _detach(name: str) -> None:
+    """Get the disk out of WSL's hands.
+
+    `wsl --terminate` stops a distribution; it does not give the disk back.
+    The lightweight virtual machine keeps the VHDX attached until *it* stops,
+    and anything that rewrites the file — compaction, the sparse conversion —
+    fails while that is true, with an error naming a lock and no owner.
+    """
+    if wsl.running(name):
+        wsl.stop(name)
+    report.say("stopping WSL entirely — the disk stays attached to the shared VM until it stops")
+    wsl.execute("--shutdown")
 
 
 def set_default(name: str) -> None:

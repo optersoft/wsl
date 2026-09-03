@@ -20,7 +20,8 @@ from __future__ import annotations
 import csv
 import io
 import re
-from dataclasses import dataclass
+import xml.etree.ElementTree as ElementTree
+from dataclasses import dataclass, replace
 
 from . import report, wsl
 from .run import run
@@ -65,24 +66,27 @@ def label(value: str) -> str:
 def parse_tasks(output: str) -> list[Task]:
     """Read `schtasks /Query /FO CSV /V`, keeping only the wslx folder.
 
-    The column *headings* are localised, but their order is not, and neither
-    are the task names — so the folder prefix identifies our rows and the
-    header row is identified by its first cell repeating the task-name column.
+    The column *headings* are localised and so are most of the values, but the
+    task names are not — so the folder prefix identifies our rows, and only the
+    columns whose position is fixed at the start of the row are read from here.
+
+    The schedule is deliberately **not** one of them. On a Spanish Windows the
+    "Schedule Type" cell says `Diariamente`, and matching it against a list of
+    English words is how a working daily task displays a blank schedule; that
+    question is answered from the task's XML instead, which is language
+    neutral. Found on a Spanish Windows 10 22H2 desktop, where every task came
+    back with an empty column.
     """
     tasks = []
     for row in csv.reader(io.StringIO(output)):
         if len(row) < 9 or not row[1].startswith(FOLDER + "\\"):
             continue
         name, next_run, status = row[1], row[2], row[3]
-        # /V puts the command in "Task To Run" and the trigger in "Schedule
-        # Type"; both sit at fixed offsets from the start of the verbose row.
-        command = row[8] if len(row) > 8 else ""
-        schedule = next((cell for cell in row if cell.upper() in SCHEDULES), "")
         tasks.append(
             Task(
                 label=name.split("\\")[-1],
-                command=command,
-                schedule=schedule,
+                command=row[8],
+                schedule="",
                 next_run=next_run,
                 status=status,
             )
@@ -90,13 +94,50 @@ def parse_tasks(output: str) -> list[Task]:
     return tasks
 
 
+#: What each Task Scheduler trigger element means, in schtasks' own words.
+_TRIGGERS = {
+    "BootTrigger": "ONSTART",
+    "LogonTrigger": "ONLOGON",
+    "TimeTrigger": "ONCE",
+    "ScheduleByDay": "DAILY",
+    "ScheduleByWeek": "WEEKLY",
+    "ScheduleByMonth": "MONTHLY",
+}
+
+
+def parse_schedule(xml: str) -> str:
+    """Read the trigger out of a task's XML definition.
+
+    Every element here is a Task Scheduler schema name, identical on every
+    Windows in every language — which is the whole reason to ask the XML
+    rather than read a translated table cell. The namespace is stripped
+    because the schema URI has changed between Windows versions.
+    """
+    try:
+        root = ElementTree.fromstring(xml.lstrip("\ufeff"))
+    except ElementTree.ParseError:
+        return ""
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag in _TRIGGERS:
+            return _TRIGGERS[tag]
+    return ""
+
+
 def tasks() -> list[Task]:
-    """Every task wslx has scheduled."""
+    """Every task wslx has scheduled, with its trigger."""
     wsl._require_windows()
     result = run(["schtasks", "/Query", "/FO", "CSV", "/V"])
     # An empty folder makes schtasks exit non-zero with "no tasks", which is
     # not an error to report — it is an empty list.
-    return parse_tasks(result.out) if result.out else []
+    found = parse_tasks(result.out) if result.out else []
+    return [replace(task, schedule=schedule(task.label)) for task in found]
+
+
+def schedule(task: str) -> str:
+    """When a task runs, read from its XML rather than from a translated table."""
+    xml = run(["schtasks", "/Query", "/TN", f"{FOLDER}\\{task}", "/XML", "ONE"])
+    return parse_schedule(xml.out) if xml.ok else ""
 
 
 def command_for(name: str, command: str, *, user: str = wsl.BOX_USER) -> str:
