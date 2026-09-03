@@ -151,16 +151,32 @@ class UsbPanel(_Tab):
         )
 
     def refresh(self) -> None:
-        if not usb.installed():
+        """Ask usbipd for the devices — including whether it is there at all.
+
+        Both questions are subprocess calls, so both go to the worker: doing
+        the `usbipd --version` probe here would block the window every time
+        this tab is opened.
+        """
+        self.frame.worker.submit(
+            "Reading USB devices",
+            lambda: usb.devices() if usb.installed() else None,
+            done=self._show,
+            quiet=True,
+        )
+
+    def _show(self, devices: list[usb.Device] | None) -> None:
+        if devices is None:
             self.banner.SetLabel(
                 "usbipd-win is not installed — WSL cannot see USB devices without it. "
                 "Install it with: winget install --exact dorssel.usbipd-win"
             )
             self.table.fill([], lambda device: [])
-            self.Layout()
-            return
-        self.banner.SetLabel("Sharing a device asks for administrator permission, once per device.")
-        self.load("Reading USB devices", usb.devices, self._cells)
+        else:
+            self.banner.SetLabel(
+                "Sharing a device asks for administrator permission, once per device."
+            )
+            self.table.fill(devices, self._cells)
+        self.Layout()
 
     @staticmethod
     def _cells(device: usb.Device) -> list[str]:

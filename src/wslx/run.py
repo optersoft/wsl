@@ -184,7 +184,7 @@ def elevate(argv: list[str]) -> int:
     info.nShow = SW_HIDE
 
     if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)):
-        error = ctypes.get_last_error() or ctypes.GetLastError()
+        error = ctypes.GetLastError()
         if error == ERROR_CANCELLED:
             raise RunError("administrator permission was declined")
         raise RunError(f"could not elevate {argv[0]} (error {error})")

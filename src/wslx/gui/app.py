@@ -79,8 +79,9 @@ class MainFrame(wx.Frame):
 
     # --- the log ------------------------------------------------------------
 
-    def write(self, message: str) -> None:
-        self.log.AppendText(message.rstrip("\n") + "\n")
+    def write(self, message: str, newline: bool = True) -> None:
+        """Append to the log, leaving a half-written line open when asked."""
+        self.log.AppendText(message.rstrip("\n") + ("\n" if newline else ""))
 
     # --- refreshing ---------------------------------------------------------
 

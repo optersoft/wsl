@@ -67,8 +67,11 @@ class Worker:
         while True:
             label, work, done, quiet = self._jobs.get()
             # The core reports progress through `report.say`; while this job
-            # runs, that means a line in the log pane.
-            with report.sink(lambda message, end: wx.CallAfter(self._log, message + end.strip())):
+            # runs, that means a line in the log pane. `end` is honoured so
+            # that "alfa: starting ..." and the " done." that completes it a
+            # few seconds later arrive as one line, the way they read in a
+            # terminal — the log is a transcript, not a list of events.
+            with report.sink(self._progress):
                 try:
                     result = work()
                 except (WslError, RunError) as error:
@@ -80,6 +83,9 @@ class Worker:
             wx.CallAfter(self._status, f"{label}: done")
             if done is not None:
                 wx.CallAfter(done, result)
+
+    def _progress(self, message: str, end: str) -> None:
+        wx.CallAfter(self._log, message, end == "\n")
 
     def _failed(self, label: str, message: str, quiet: bool) -> None:
         self._log(f"error: {message}")
