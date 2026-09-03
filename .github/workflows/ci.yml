@@ -120,7 +120,61 @@ jobs:
           Write-Host "wsl --version: $version"
           $usable = ($LASTEXITCODE -eq 0) -and ($version -match 'WSL')
           Write-Host "live WSL suite: $(if ($usable) { 'yes' } else { 'NO — modern wsl.exe absent' })"
-          "usable=$($usable.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # An env var rather than a step output, because the install attempt
+          # below may change the answer and a step output cannot be rewritten.
+          "WSL_LIVE=$(if ($usable) { 'yes' } else { 'no' })" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $global:LASTEXITCODE = 0
+
+      # The older image ships the inbox `wsl.exe` — the one that predates
+      # `--version`, `--manage` and systemd, and answers a version query with
+      # its usage text. Without systemd cloud-init cannot run, so every seeded
+      # machine would come up wrong and the live suite has nothing to assert.
+      #
+      # This step tries to fix that in place: enable the two optional features
+      # and install the WSL MSI from microsoft/WSL, which is how a real machine
+      # gets a modern WSL when the Store is unavailable. The open question is
+      # whether it works without a restart, which a runner cannot survive — so
+      # the step is allowed to fail and simply re-probes afterwards. If it
+      # succeeds the whole live suite runs here too; if it does not, the log
+      # says why in one line.
+      - name: try to give the older image a modern WSL
+        if: env.WSL_LIVE != 'yes'
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          foreach ($feature in @('VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux')) {
+            $state = (Get-WindowsOptionalFeature -Online -FeatureName $feature).State
+            Write-Host "$feature was $state"
+            if ($state -ne 'Enabled') {
+              dism.exe /online /enable-feature /featurename:$feature /all /norestart | Out-Null
+              Write-Host "$feature now $((Get-WindowsOptionalFeature -Online -FeatureName $feature).State)"
+            }
+          }
+
+          $msi = "$env:RUNNER_TEMP\wsl.msi"
+          Invoke-WebRequest -UseBasicParsing -OutFile $msi `
+            "https://github.com/microsoft/WSL/releases/download/2.7.11/wsl.2.7.11.0.x64.msi"
+          Start-Process msiexec.exe -Wait -ArgumentList "/i", $msi, "/quiet", "/norestart"
+          Write-Host "msiexec exit: $LASTEXITCODE"
+
+          $version = ''
+          try { $version = (wsl.exe --version 2>&1 | Out-String).Trim() } catch { $version = "$_" }
+          Write-Host "wsl --version now: $version"
+          if ($LASTEXITCODE -eq 0 -and $version -match 'WSL') {
+            # It answers. Whether it can actually start a VM without a restart
+            # is the next question, and `wsl --status` is cheaper to ask than a
+            # 400 MB import.
+            wsl.exe --status
+            Write-Host "wsl --status exit: $LASTEXITCODE"
+            if ($LASTEXITCODE -eq 0) {
+              "WSL_LIVE=yes" | Out-File -FilePath $env:GITHUB_ENV -Append
+              Write-Host "the live suite will run on this image"
+            } else {
+              Write-Host "modern wsl.exe installed but the VM platform needs a restart — live suite stays skipped"
+            }
+          }
           $global:LASTEXITCODE = 0
 
       - run: uv run pytest -q
@@ -132,7 +186,7 @@ jobs:
         run: uv run python -c "import wx; import wslx.gui; print('wxPython', wx.version())"
 
       - name: the live suite cannot be skipped on the newer image
-        if: steps.probe.outputs.usable != 'true' && matrix.image == 'windows-2025'
+        if: env.WSL_LIVE != 'yes' && matrix.image == 'windows-2025'
         run: |
           throw "windows-2025 ships WSL2; if wsl --version does not answer, that is a regression in the image or in this job, not something to skip"
 
@@ -141,7 +195,7 @@ jobs:
       # that used to yield a bogus row, so assert the empty case before
       # creating anything.
       - name: list with no distributions registered
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           $out = uv run wslx list 2>&1 | Out-String
           Write-Host $out
@@ -150,7 +204,7 @@ jobs:
           }
 
       - name: create, seed and inspect a distribution
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           uv run wslx create ci
           if ($LASTEXITCODE -ne 0) { throw "wslx create failed" }
@@ -191,7 +245,7 @@ jobs:
           if ($who -ne 'box') { throw "default user is '$who', expected 'box'" }
 
       - name: info reads the registry and the machine
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           uv run wslx start ci
           $out = uv run wslx info ci 2>&1 | Out-String
@@ -208,7 +262,7 @@ jobs:
       # `wsl --import` does not preserve the default user and putting that back
       # is the one thing wslx adds to it.
       - name: export, restore and clone
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           $tar = "$env:RUNNER_TEMP\ci.tar"
           uv run wslx export ci $tar
@@ -238,7 +292,7 @@ jobs:
       # matters. The firewall rule is half the feature and the half everyone
       # forgets, so it is asserted separately.
       - name: publish a port, with its firewall rule
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           uv run wslx start ci
           uv run wslx forward add ci 18080 --inside 80
@@ -269,7 +323,7 @@ jobs:
       # not detach the disk from the shared VM, so each of these has to shut
       # WSL down first, and diskpart has to be retried while it lets go.
       - name: compact and make the disk sparse
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           uv run wslx start ci
           # Something to reclaim, or the compaction is measuring noise.
@@ -293,7 +347,7 @@ jobs:
       # column came back empty. An English runner cannot catch that regression,
       # but it can catch the lookup breaking entirely.
       - name: schedule a command
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           # pwsh 7.4 turns any non-zero native exit into a terminating error
           # when $ErrorActionPreference is Stop, which is what the runner sets.
@@ -324,7 +378,7 @@ jobs:
       # correctly empty; usbipd-win is not installed, so `usb list` must
       # explain that rather than produce a traceback.
       - name: the empty and the missing
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           # `usb list` exits non-zero on purpose here — usbipd-win is absent.
           $ErrorActionPreference = 'Continue'
@@ -342,7 +396,7 @@ jobs:
           $global:LASTEXITCODE = 0
 
       - name: list, stop and delete
-        if: steps.probe.outputs.usable == 'true'
+        if: env.WSL_LIVE == 'yes'
         run: |
           $out = uv run wslx list 2>&1 | Out-String
           Write-Host $out
@@ -359,6 +413,23 @@ jobs:
           # delete must take the disk and the cloud-init seed with it.
           if (Test-Path "$env:APPDATA\wslx\ci") { throw "instance directory survived delete" }
           if (Test-Path "$env:USERPROFILE\.cloud-init\ci.user-data") { throw "cloud-init seed survived delete" }
+
+      # A green tick on this job means two very different things depending on
+      # the image, so it says which on the run's summary page rather than
+      # leaving it to whoever opens the log.
+      - name: say what this image actually covered
+        if: always()
+        run: |
+          $live = if ($env:WSL_LIVE -eq 'yes') { 'yes' } else { 'no — unit tests, wxPython wheel and GUI import only' }
+          @(
+            "### ${{ matrix.label }} (``${{ matrix.image }}``)",
+            "",
+            "| | |",
+            "|---|---|",
+            "| Image | $((Get-CimInstance Win32_OperatingSystem).Caption), build $([System.Environment]::OSVersion.Version.Build) |",
+            "| Live WSL suite | $live |",
+            "| Hyper-V Optimize-VHD | $([bool](Get-Command Optimize-VHD -ErrorAction SilentlyContinue)) — when false, ``compact`` takes the diskpart path |"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
   publish:
     needs: [test, windows]
