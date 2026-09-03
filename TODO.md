@@ -7,9 +7,12 @@
       and its USB section is a `TODO:` with two links — which `wslx usb` now covers.
       Decide how much of the manager surface belongs in a first-year course page
       before writing it: backup/clone probably yes, `wsl --mount` probably not.
-- [ ] The **elevated paths are untested**: compact, move, mount and `forward add`
-      raise a UAC prompt, which cannot be answered over SSH, so the Isard run
-      skips them. They need one manual pass in the GUI on a real desktop.
+- [ ] Two features remain **unverified on real hardware**, for want of hardware:
+      `wslx usb` (the Isard desktop has no usbipd-win and no USB devices to pass
+      through) and `wslx mount` / `disks` (one disk, and it is the boot disk, so
+      the listing is correctly empty). `move` is untested for the same reason —
+      one drive. Everything else, elevated paths included, passes on the
+      `windows` desktop; see `Shipped` below.
 - [ ] `wslx gui` has no icon and no `.ico`, so the window shows wxPython's
       default. Fine for now, wrong for a screenshot on the academy page.
 - [ ] Release 0.2.0 once the above two are settled — the version in `pyproject`
@@ -34,6 +37,18 @@
 
 ## Shipped
 
+- 2026-09-03 · Verified end to end on the Isard `windows` desktop (Windows 10
+  22H2, Spanish, WSL 2.7.11): 39 of 40 steps green on the first run, then all of
+  them. Run as a scheduled task with `RunLevel Highest`, which is what makes the
+  elevated paths testable at all — a UAC prompt cannot be answered over SSH, but
+  an already-elevated process raises none. `compact` measured: 1321205760 →
+  1301282816 bytes, and the tool said "recovered 19.00 MB"
+- 2026-09-03 · Four bugs the Mac could not have found, all from that run:
+  `compact`/`sparse` could never work (`--terminate` does not detach the disk
+  from the shared VM); `elevate_script`'s `chcp 65001` broke diskpart;
+  `wsl --shutdown` returns before the disk is free, so compaction needs a
+  retry; and the task schedule column was blank on a Spanish Windows, because
+  schtasks translates its CSV — the trigger now comes from the task XML
 - 2026-09-03 · The manager surface: `info`, `export`/`restore`/`clone`, `move`,
   `compact`, `sparse`, `default`, `shutdown`, `open`/`terminal`/`code`,
   `forward add|list|remove|repair`, `usb`, `task`, `mount`/`unmount`/`disks`,

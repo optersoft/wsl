@@ -177,15 +177,26 @@ def compact(name: str) -> int:
     if not disk.is_file():
         raise WslError(f"{name}: no ext4.vhdx at {entry.base_path}")
 
+    # Measured here, before anything runs, because this is the number the user
+    # is looking at when they ask for a compaction. Taking it after the trim
+    # attributes the operation's own saving to nobody: `fstrim` plus the
+    # shutdown can give back tens of megabytes on their own, and then diskpart
+    # correctly reports that there is nothing left — so the tool would say it
+    # recovered nothing while the file visibly shrank.
+    before = disk.stat().st_size
+
     if wsl.running(name):
         report.say(f"{name}: trimming the filesystem ...")
         wsl.execute("-d", name, "--user", "root", "--exec", "fstrim", "/")
     _detach(name)
-    before = disk.stat().st_size
 
     report.say(f"{name}: compacting {info.human(before)} (administrator permission required) ...")
+    # Hyper-V's cmdlet is either installed or it is not — retrying that is
+    # eleven seconds spent asking the same question. Only diskpart's failures
+    # are worth a second look, because those are the ones the shutdown races.
+    strategies = ([_optimize_vhd] if _optimize_available() else []) + [_diskpart_compact]
     reasons = []
-    for attempt in (_optimize_vhd, _diskpart_compact):
+    for attempt in strategies:
         ok, reason = _retry(attempt, disk)
         if ok:
             break
@@ -193,8 +204,16 @@ def compact(name: str) -> int:
     else:
         raise WslError(f"{name}: could not compact the disk — {'; '.join(reasons)}")
 
+    # Windows serves a file's size from a directory entry it caches for about
+    # a second, so asking straight after diskpart detaches the disk returns
+    # the size it had before — and the tool reports recovering nothing while
+    # the file on disk is visibly smaller.
+    time.sleep(2)
     saved = before - disk.stat().st_size
-    report.say(f"{name}: recovered {info.human(max(saved, 0))}")
+    if saved <= 0:
+        report.say(f"{name}: nothing left to recover — the disk is already as small as it can be")
+        return 0
+    report.say(f"{name}: recovered {info.human(saved)}")
     return saved
 
 
@@ -217,10 +236,13 @@ def _retry(attempt: Callable[[Path], tuple[bool, str]], disk: Path) -> tuple[boo
     return False, reason
 
 
+def _optimize_available() -> bool:
+    """Is Hyper-V's `Optimize-VHD` here? It is absent on Windows Home."""
+    return bool(powershell("Get-Command Optimize-VHD -ErrorAction SilentlyContinue").out.strip())
+
+
 def _optimize_vhd(disk: Path) -> tuple[bool, str]:
-    """Hyper-V's compaction. Absent on Windows Home, so failure is expected."""
-    if not powershell("Get-Command Optimize-VHD -ErrorAction SilentlyContinue").out.strip():
-        return False, "Optimize-VHD is not available (it comes with Hyper-V)"
+    """Hyper-V's compaction — faster than diskpart when it exists."""
     script = f"Optimize-VHD -Path '{disk}' -Mode Full"
     command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
     result = elevate_script([command])
