@@ -22,8 +22,10 @@
       diskpart, the path a student's Home laptop takes — and a real USB bus.
       A self-hosted runner on the Isard desktop is the only way to get those.
       Everything else does run on both images; see below.
-- [ ] Release 0.2.0 once the above two are settled — the version in `pyproject`
-      is still 0.1.1, and PyPI's 0.1.1 metadata links `/tool/wsl` (see below).
+- [ ] `[human]` **PyPI's 0.2.0 metadata points `Documentation` at the academy
+      page**, which still documents six commands out of thirty. Nothing to fix
+      in the package — released metadata is immutable — but it is the first
+      thing a new user reads, so the page is now the long pole.
 
 - [ ] `[human]` `README.md` and the PyPI metadata point at
       <https://academy.optersoft.com/windows/wsl>, which today is the tutorial for
@@ -44,6 +46,18 @@
 
 ## Shipped
 
+- 2026-09-03 · **wslx 0.2.0 on PyPI**, published by the tag `v0.2.0` over
+  trusted publishing — so the `optersoft/wsl` publisher is confirmed correct
+  after the return to GitHub, which had not been re-verified. Both artifacts
+  uploaded; `uvx --from "wslx[gui]==0.2.0"` resolves wxPython. ⚠️ The index
+  lags the JSON API by a minute or two: the first `uvx` after a release can
+  say "no version of wslx==0.2.0", which is propagation, not a failed upload
+- 2026-09-03 · Rich was eating the brackets in `wslx gui`'s own advice — it
+  told people to install `wslx[gui]` and printed "install wslx", the one word
+  that made it wrong. Errors and the name column are escaped now. Found by
+  running the built artifact, and nearly missed because
+  `uv run --with <local wheel>` caches by version and kept re-testing the
+  previous build; the publish job's smoke steps pass `--no-cache`
 - 2026-09-03 · **The full live suite runs on both GitHub images.** There is no
   Windows 10 or 11 runner — only Server — so the matrix is `windows-2022`
   (build 20348, the Win10 21H2 codebase) and `windows-2025` (build 26100, the
