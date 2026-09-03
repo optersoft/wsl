@@ -250,3 +250,36 @@ def test_user_data_creates_the_box_user() -> None:
 def test_entry_points_refuse_to_run_off_windows(call, args) -> None:
     with pytest.raises(WslError, match="only available on Windows"):
         call(*args)
+
+
+def test_create_forces_wsl_2(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """`wsl --import` honours the machine's default version, which may be 1.
+
+    A WSL 1 distribution has no systemd, so cloud-init never runs and nothing
+    wslx promises about a machine is true — and it has no `ext4.vhdx`, so
+    `managed` used to return False and the seed check never fired. A
+    windows-2022 CI runner, whose default version is 1, is where this surfaced.
+    """
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(wsl, "_require_windows", lambda: None)
+    monkeypatch.setattr(wsl, "registered", lambda name: False)
+    monkeypatch.setattr(wsl, "cached", lambda file, url: tmp_path / file)
+    monkeypatch.setattr(wsl, "cloud_init_file", lambda name: tmp_path / f"{name}.user-data")
+    monkeypatch.setattr(wsl, "instance_dir", lambda name: tmp_path / name)
+    monkeypatch.setattr(wsl, "_call", lambda *args, error: calls.append(args))
+
+    wsl.create("alfa")
+
+    assert calls, "create ran no command"
+    assert calls[0][:2] == ("--import", "alfa")
+    assert calls[0][-2:] == ("--version", "2")
+
+
+def test_managed_counts_a_distribution_with_no_vhdx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A WSL 1 distribution wslx imported is still wslx's to check."""
+    monkeypatch.setattr(wsl, "instance_dir", lambda name: tmp_path / name)
+    (tmp_path / "alfa").mkdir()
+    assert wsl.managed("alfa")
+    assert not wsl.managed("beta")
