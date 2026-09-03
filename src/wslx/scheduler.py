@@ -140,18 +140,21 @@ def schedule(task: str) -> str:
     return parse_schedule(xml.out) if xml.ok else ""
 
 
-def command_for(name: str, command: str, *, user: str = wsl.BOX_USER) -> str:
+def command_for(name: str, command: str, *, user: str | None = None) -> str:
     """The Windows command line that runs `command` inside `name`.
 
     `--cd ~` so a relative path in the command means what it would mean in a
-    shell there, and `-u` so a task does not silently run as root just because
-    DefaultUid says so.
+    shell there. `-u` is passed only for a machine wslx made, where `box` is
+    known to exist: naming it on someone else's Ubuntu schedules a task that
+    fails every night with "no such user", and leaving it out lets that
+    distribution use whichever user it opens as.
     """
     import subprocess  # noqa: PLC0415 - only for its Windows quoting rules
 
-    return subprocess.list2cmdline(
-        ["wsl.exe", "-d", name, "-u", user, "--cd", "~", "--", "sh", "-lc", command]
-    )
+    argv = ["wsl.exe", "-d", name]
+    if user:
+        argv += ["-u", user]
+    return subprocess.list2cmdline([*argv, "--cd", "~", "--", "sh", "-lc", command])
 
 
 def create(
@@ -162,7 +165,7 @@ def create(
     schedule: str = "DAILY",
     at: str | None = None,
     modifier: str | None = None,
-    user: str = wsl.BOX_USER,
+    user: str | None = None,
 ) -> Task:
     """Schedule `command` to run inside the distribution `name`.
 
@@ -179,6 +182,8 @@ def create(
         raise WslError(f"{name}: not registered")
     if at and not re.match(r"^\d{2}:\d{2}$", at):
         raise WslError(f"{at}: a start time is HH:MM")
+    if user is None and wsl.managed(name):
+        user = wsl.BOX_USER
 
     argv = [
         "schtasks",

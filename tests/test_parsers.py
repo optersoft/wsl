@@ -257,3 +257,11 @@ def test_elevated_script_keeps_the_commands_in_order_and_logs_each() -> None:
     text = run.script_text([["netsh", "a"], ["netsh", "b"]], Path("C:\\log"))
     lines = [line for line in text.splitlines() if line.startswith("netsh")]
     assert lines == ['netsh a >> "C:\\log" 2>&1', 'netsh b >> "C:\\log" 2>&1']
+
+
+def test_command_for_names_the_box_user_only_when_wslx_made_the_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`-u box` on someone else's Ubuntu is a task that fails every night."""
+    assert " -u box " in scheduler.command_for("alfa", "uptime", user="box")
+    assert " -u " not in scheduler.command_for("Ubuntu", "uptime")

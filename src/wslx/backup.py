@@ -76,7 +76,12 @@ def restore(name: str, path: Path, *, directory: Path | None = None) -> None:
     target.mkdir(parents=True, exist_ok=True)
 
     report.say(f"{name}: importing {path.name} ...")
-    result = wsl.execute("--import", name, str(target), str(path), "--version", "2")
+    # `export --vhd` writes a disk, not a tarball, and importing one needs a
+    # different flag — without it WSL tries to untar a VHDX and says the
+    # archive is corrupt, which sends you looking at the wrong thing.
+    args = ["--import", name, str(target), str(path)]
+    args += ["--vhd"] if path.suffix.lower() == ".vhdx" else ["--version", "2"]
+    result = wsl.execute(*args)
     if not result.ok:
         raise WslError(f"{name}: import failed — {result.message}")
 

@@ -14,6 +14,7 @@ because typing it correctly every time is not free.
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 
@@ -53,7 +54,8 @@ def terminal(name: str, directory: str = "~", env: dict[str, str] | None = None)
 
     inner = ["wsl.exe", "-d", name, "--cd", directory]
     if env:
-        exports = "".join(f"export {key}={value!r}; " for key, value in env.items())
+        # shlex, not repr: a proxy password is allowed to contain a quote.
+        exports = "".join(f"export {key}={shlex.quote(value)}; " for key, value in env.items())
         inner += ["--", "bash", "-lc", f"{exports}exec bash -l"]
 
     if shutil.which("wt.exe"):
