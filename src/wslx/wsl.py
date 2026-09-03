@@ -8,15 +8,19 @@ tested from any machine.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import registry, report
 from .cloud_init import user_data
 from .download import cached
 from .paths import cloud_init_file, instance_dir
+from .run import Result, decode
+from .run import run as _run
 
 #: Ubuntu WSL root filesystem image (Noble, current).
 ROOTFS_URL = (
@@ -55,24 +59,29 @@ def _require_windows() -> None:
         raise WslError("WSL is only available on Windows")
 
 
-def decode(data: bytes) -> str:
-    """Decode `wsl.exe` output.
-
-    With `WSL_UTF8=1` (which we always set) it is UTF-8, but older builds and
-    some code paths still emit UTF-16LE — recognisable by its interleaved NUL
-    bytes.
-    """
-    if b"\x00" in data:
-        return data.decode("utf-16-le", errors="replace")
-    return data.decode("utf-8", errors="replace")
+# `decode` lives in `run` now: netsh and schtasks need the same three-encoding
+# dance, and one copy of it is enough. Re-exported because it is part of this
+# module's published surface.
+__all__ = ["Distribution", "WslError", "decode", "parse_names", "parse_verbose"]
 
 
 def _env() -> dict[str, str]:
-    import os
-
     env = dict(os.environ)
     env["WSL_UTF8"] = "1"
     return env
+
+
+def execute(*args: str, timeout: float | None = None) -> Result:
+    """Run `wsl.exe` and return everything it said, including its exit code.
+
+    The exit code matters to the operations that can half-succeed — an export
+    that ran out of disk, an import that landed on a path WSL will not accept —
+    which is why they call this and not :func:`capture`.
+    """
+    try:
+        return _run(["wsl.exe", *args], env=_env(), timeout=timeout)
+    except OSError as exc:
+        raise WslError("wsl.exe not found — is WSL installed?") from exc
 
 
 def _capture(*args: str) -> str:
@@ -87,6 +96,11 @@ def _capture(*args: str) -> str:
     except OSError:
         return ""
     return decode(result.stdout)
+
+
+def capture(*args: str) -> str:
+    """:func:`_capture` under a public name, for the modules built on top."""
+    return _capture(*args)
 
 
 def _spawn(*args: str) -> int:
@@ -173,7 +187,7 @@ def create(name: str) -> None:
     instance = instance_dir(name)
     instance.mkdir(parents=True, exist_ok=True)
 
-    print(f"{name}: importing WSL distribution ...")
+    report.say(f"{name}: importing WSL distribution ...")
     _call(
         "--import",
         name,
@@ -187,14 +201,14 @@ def start(name: str) -> None:
     """Boot `name` and pin its default user to `box`."""
     _require_windows()
     if running(name):
-        print(f"{name}: already running")
+        report.say(f"{name}: already running")
         return
     if not registered(name):
         raise WslError(f"{name}: not registered")
 
-    print(f"{name}: starting ...", end="", flush=True)
+    report.say(f"{name}: starting ...", end="")
     _boot(name, error=f"{name}: failed to start")
-    print(" done.")
+    report.say(" done.")
 
     # The [user] default in wsl.conf is unreliable; force the default UID to
     # 1000 (the `box` user) via the Lxss registry key. WSL binds DefaultUid
@@ -257,34 +271,12 @@ def seeded(name: str) -> bool:
 
 
 def set_default_uid(name: str, uid: int = BOX_UID) -> None:
-    """Set `DefaultUid` for `name` under HKCU\\...\\Lxss."""
+    """Set `DefaultUid` for `name` (the registry walk lives in `registry`)."""
     _require_windows()
-    import winreg  # noqa: PLC0415 - windows-only stdlib module
-
-    lxss_path = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
     try:
-        lxss = winreg.OpenKey(winreg.HKEY_CURRENT_USER, lxss_path)
-    except OSError as exc:
-        raise WslError("opening Lxss registry key") from exc
-
-    with lxss:
-        index = 0
-        while True:
-            try:
-                sub = winreg.EnumKey(lxss, index)
-            except OSError:
-                break
-            index += 1
-            with winreg.OpenKey(lxss, sub, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
-                try:
-                    distribution, _ = winreg.QueryValueEx(key, "DistributionName")
-                except FileNotFoundError:
-                    continue
-                if distribution == name:
-                    winreg.SetValueEx(key, "DefaultUid", 0, winreg.REG_DWORD, uid)
-                    return
-
-    raise WslError(f"{name}: distribution not found in registry")
+        registry.set_default_uid(name, uid)
+    except registry.RegistryError as exc:
+        raise WslError(str(exc)) from exc
 
 
 def stop(name: str) -> None:
@@ -299,10 +291,10 @@ def delete(name: str) -> None:
     """Unregister `name` and remove the files wslx created for it."""
     _require_windows()
     if not registered(name):
-        print(f"{name}: not registered")
+        report.say(f"{name}: not registered")
         return
 
-    print(f"{name}: removing WSL distribution")
+    report.say(f"{name}: removing WSL distribution")
     _call("--unregister", name, error=f"{name}: wsl --unregister failed")
 
     shutil.rmtree(instance_dir(name), ignore_errors=True)
