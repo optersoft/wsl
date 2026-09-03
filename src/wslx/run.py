@@ -197,6 +197,20 @@ def elevate(argv: list[str]) -> int:
     return int(code.value)
 
 
+def script_text(commands: list[list[str]], log: Path) -> str:
+    """The `.cmd` file :func:`elevate_script` runs.
+
+    Split out from it so the quoting can be tested anywhere: this is the one
+    function in wslx whose output a shell parses, so it is the one that has to
+    be right about a name like `a & shutdown /r`. `list2cmdline` quotes each
+    argument, and cmd.exe's parser then sees the `&` inside quotes as text.
+    """
+    lines = ["@echo off", "chcp 65001 > nul"]
+    for command in commands:
+        lines.append(f'{subprocess.list2cmdline(command)} >> "{log}" 2>&1')
+    return "\r\n".join(lines) + "\r\n"
+
+
 def elevate_script(commands: list[list[str]], *, name: str = "wslx") -> Result:
     """Run several commands as administrator, in order, and read their output.
 
@@ -207,24 +221,18 @@ def elevate_script(commands: list[list[str]], *, name: str = "wslx") -> Result:
     The commands go into a `.cmd` file we write ourselves and hand to
     `cmd /c`, instead of being joined with `&` on the command line. Same
     result, but the only string a shell parses is one this module built from
-    already-quoted arguments in a file only this user can write — so a
-    distribution named `a & shutdown /r` is a name, not a second command.
+    already-quoted arguments, in a file only this user can write — and the log
+    is the only way to see what a window-less elevated process said.
     """
-    lines = ["@echo off", "chcp 65001 > nul"]
-    lines += [subprocess.list2cmdline(command) for command in commands]
-    script = Path(tempfile.mkdtemp(prefix=f"{name}-")) / f"{name}.cmd"
+    workspace = Path(tempfile.mkdtemp(prefix=f"{name}-"))
+    script = workspace / f"{name}.cmd"
     log = script.with_suffix(".log")
-    # Each command's own output is appended; `>>` keeps all of them, and the
-    # log is the only way to see what an elevated, window-less process said.
-    script.write_text(
-        "\r\n".join(lines[:2] + [f"{line} >> \"{log}\" 2>&1" for line in lines[2:]]) + "\r\n",
-        encoding="utf-8",
-    )
+    script.write_text(script_text(commands, log), encoding="utf-8")
     try:
         code = elevate(["cmd.exe", "/c", str(script)])
         output = decode(log.read_bytes()) if log.is_file() else ""
     finally:
         for path in (script, log):
             path.unlink(missing_ok=True)
-        script.parent.rmdir()
+        workspace.rmdir()
     return Result(code, output, "" if code == 0 else output)

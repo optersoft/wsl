@@ -7,6 +7,11 @@ Manage Ubuntu **WSL** virtual machines from the command line.
 a shell in it — one command per lifecycle step, no manual `wsl --import`
 juggling.
 
+It also manages the machines once they exist: back one up, clone it, move or
+compact its disk, publish a port with the firewall rule that goes with it, hand
+it a USB device, run a command in it on a schedule, mount a real disk into it.
+`wslx --help` lists everything; `wslx gui` opens the same thing as a window.
+
 ## Documentation
 
 **All instructions and the tutorial live at
@@ -16,6 +21,12 @@ juggling.
 
 ```console
 uv tool install wslx
+```
+
+With the window (wxPython, a ~20 MB dependency the CLI does not need):
+
+```console
+uv tool install "wslx[gui]"
 ```
 
 or run it without installing:

@@ -9,6 +9,8 @@ localised ones included.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from wslx import config, info, mount, network, run, scheduler, usb, wslconf
@@ -213,3 +215,24 @@ def test_settings_round_trip(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
     config.save(config.Settings(proxy=config.Proxy(enabled=True, host="p", port="1")))
     assert config.load().proxy.host == "p"
+
+
+def test_elevated_script_quotes_a_hostile_distribution_name(tmp_path) -> None:
+    """The one string a shell parses has to survive a name with a `&` in it.
+
+    A WSL distribution can be registered by anything the user runs, without
+    administrator rights, and its name comes back from `wsl --list`. If that
+    name reached an elevated `cmd /c` unquoted, the part after the `&` would
+    run as administrator.
+    """
+    text = run.script_text([["wsl.exe", "--terminate", "a & shutdown /r /t 0"]], tmp_path / "l")
+    assert '"a & shutdown /r /t 0"' in text
+    # One command, one line — nothing after the quoted name is a second command.
+    commands = [line for line in text.splitlines() if line.startswith("wsl.exe")]
+    assert len(commands) == 1
+
+
+def test_elevated_script_keeps_the_commands_in_order_and_logs_each() -> None:
+    text = run.script_text([["netsh", "a"], ["netsh", "b"]], Path("C:\\log"))
+    lines = [line for line in text.splitlines() if line.startswith("netsh")]
+    assert lines == ['netsh a >> "C:\\log" 2>&1', 'netsh b >> "C:\\log" 2>&1']
