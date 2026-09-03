@@ -15,6 +15,14 @@
       `windows` desktop; see `Shipped` below.
 - [ ] `wslx gui` has no icon and no `.ico`, so the window shows wxPython's
       default. Fine for now, wrong for a screenshot on the academy page.
+- [ ] `[human]` **CI cannot run a client Windows.** GitHub hosts Server images
+      only, so `windows-2022` / `windows-2025` stand in for the Windows 10 and
+      11 codebases. Three things therefore stay desktop-only: an interactive UAC
+      prompt (a runner is already elevated, so `compact` and `forward add`
+      never raise one there), a Windows edition with no Hyper-V — where
+      `compact` must fall back to diskpart, which is the path a student's Home
+      laptop takes — and a real USB bus. If that matters more later, a
+      self-hosted runner on the Isard desktop is the only way to get it.
 - [ ] Release 0.2.0 once the above two are settled — the version in `pyproject`
       is still 0.1.1, and PyPI's 0.1.1 metadata links `/tool/wsl` (see below).
 
