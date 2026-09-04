@@ -15,6 +15,7 @@ import wx
 
 from .. import __version__, config
 from ..run import windows
+from . import theme as theming
 from .common import Worker, scale_fonts
 from .machines import MachinesPanel
 from .system import DisksPanel, NetworkPanel, SettingsPanel, TasksPanel, UsbPanel, shutdown_wsl
@@ -58,10 +59,17 @@ class MainFrame(wx.Frame):
         self.SetMenuBar(self._menus())
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
-        # Whatever text size this user needed last time, they still need.
-        self.scale = config.load().font_scale
+        # Whatever text size and colours this user needed last time, they
+        # still need.
+        settings = config.load()
+        self.scale = settings.font_scale
+        self.theme = settings.theme
         if self.scale != 1.0:
             self._zoom(self.scale)
+        if self.theme != "system":
+            theming.apply(self, self.theme)
+        if item := self.theme_items.get(self.theme):
+            item.Check(True)
 
         self.refresh()
 
@@ -92,13 +100,44 @@ class MainFrame(wx.Frame):
         smaller = view.Append(wx.ID_ANY, "&Smaller text\tCtrl+-")
         view.AppendSeparator()
         normal = view.Append(wx.ID_ANY, "&Normal text size\tCtrl+0")
-        bar.Append(view, "&View")
 
         self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(config.FONT_SCALE_STEP), bigger)
         self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(config.FONT_SCALE_STEP), bigger_alt)
         self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(1 / config.FONT_SCALE_STEP), smaller)
         self.Bind(wx.EVT_MENU, lambda event: self.zoom_to(1.0), normal)
+
+        # Radio items, because these are four answers to one question and the
+        # menu should show which one is currently true.
+        view.AppendSeparator()
+        self.theme_items = {}
+        for name, label in (
+            ("system", "Follow the s&ystem"),
+            ("white", "&White"),
+            ("gray", "G&ray"),
+            ("dark", "&Dark"),
+        ):
+            item = view.AppendRadioItem(wx.ID_ANY, label)
+            self.theme_items[name] = item
+            self.Bind(wx.EVT_MENU, lambda event, chosen=name: self.set_theme(chosen), item)
+        bar.Append(view, "&View")
         return bar
+
+    # --- looks ---------------------------------------------------------------
+
+    def set_theme(self, name: str) -> None:
+        """Repaint the window, and remember the choice."""
+        name = config.clean_theme(name)
+        self.theme = name
+        theming.apply(self, name)
+        config.update(theme=name)
+        if item := self.theme_items.get(name):
+            item.Check(True)
+        # Windows draws the title bar, the menu bar and the scrollbars itself,
+        # and only agrees to draw them dark if asked before the first window
+        # exists — so say so rather than leaving a half-dark window looking
+        # broken.
+        pending = " — the title bar follows at the next launch" if windows() else ""
+        self.SetStatusText(f"Theme: {name}{pending}")
 
     # --- text size ----------------------------------------------------------
 
@@ -167,6 +206,9 @@ def launch() -> None:
     written on — but every button will refuse, so it says so once.
     """
     app = wx.App()
+    # Before the first window: Windows only offers dark frames if asked this
+    # early, which is why the saved theme is read here and not by the frame.
+    theming.enable_dark_titlebar(app, config.load().theme)
     frame = MainFrame()
     frame.Show()
     if not windows():
