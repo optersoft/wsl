@@ -277,3 +277,23 @@ def test_result_tail_is_for_programs_that_greet_you_before_failing() -> None:
     result = run.Result(1, "Microsoft DiskPart 10.0\n\nThe disk is in use.\n", "")
     assert result.message.startswith("Microsoft DiskPart")
     assert result.tail.endswith("The disk is in use.")
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (1.0, 1.0),
+        (99, config.FONT_SCALE_MAX),
+        (0.01, config.FONT_SCALE_MIN),
+        ("1.2", 1.2),
+        ("huge", 1.0),
+        (None, 1.0),
+    ],
+)
+def test_font_scale_cannot_be_stored_into_uselessness(stored, expected) -> None:
+    """The settings file is editable, and text too small to read is a trap.
+
+    Zooming is only safe if every way back is reachable — including from a
+    value someone typed in by hand.
+    """
+    assert config.clamp_scale(stored) == expected

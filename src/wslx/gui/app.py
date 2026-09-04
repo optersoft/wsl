@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import wx
 
-from .. import __version__
+from .. import __version__, config
 from ..run import windows
-from .common import Worker
+from .common import Worker, scale_fonts
 from .machines import MachinesPanel
 from .system import DisksPanel, NetworkPanel, SettingsPanel, TasksPanel, UsbPanel, shutdown_wsl
 
@@ -30,6 +30,8 @@ class MainFrame(wx.Frame):
         self.log = wx.TextCtrl(
             splitter, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP | wx.BORDER_NONE
         )
+        # Monospaced so the progress transcript lines up; the size is set by
+        # `_zoom` a moment later, from the scale the user last chose.
         self.log.SetFont(wx.Font(wx.FontInfo(9).Family(wx.FONTFAMILY_TELETYPE)))
         splitter.SplitHorizontally(self.notebook, self.log, -140)
         splitter.SetMinimumPaneSize(80)
@@ -55,6 +57,12 @@ class MainFrame(wx.Frame):
 
         self.SetMenuBar(self._menus())
         self.Bind(wx.EVT_CLOSE, self.on_close)
+
+        # Whatever text size this user needed last time, they still need.
+        self.scale = config.load().font_scale
+        if self.scale != 1.0:
+            self._zoom(self.scale)
+
         self.refresh()
 
     def _menus(self) -> wx.MenuBar:
@@ -73,7 +81,53 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda event: self.refresh(), refresh)
         self.Bind(wx.EVT_MENU, lambda event: shutdown_wsl(self), stop_all)
         self.Bind(wx.EVT_MENU, lambda event: self.Close(), quit_)
+
+        view = wx.Menu()
+        # Ctrl+= as well as Ctrl+Shift+=, because "zoom in" is Ctrl and the
+        # plus key, and on most layouts that key is unshifted `=`. Accepting
+        # only the shifted spelling is why zoom shortcuts so often "do
+        # nothing" for the person trying them.
+        bigger = view.Append(wx.ID_ANY, "&Bigger text\tCtrl++")
+        bigger_alt = view.Append(wx.ID_ANY, "Bigger text\tCtrl+=")
+        smaller = view.Append(wx.ID_ANY, "&Smaller text\tCtrl+-")
+        view.AppendSeparator()
+        normal = view.Append(wx.ID_ANY, "&Normal text size\tCtrl+0")
+        bar.Append(view, "&View")
+
+        self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(config.FONT_SCALE_STEP), bigger)
+        self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(config.FONT_SCALE_STEP), bigger_alt)
+        self.Bind(wx.EVT_MENU, lambda event: self.zoom_by(1 / config.FONT_SCALE_STEP), smaller)
+        self.Bind(wx.EVT_MENU, lambda event: self.zoom_to(1.0), normal)
         return bar
+
+    # --- text size ----------------------------------------------------------
+
+    def zoom_by(self, factor: float) -> None:
+        """Step the text size, clamped so it cannot be zoomed into uselessness."""
+        self.zoom_to(self.scale * factor)
+
+    def zoom_to(self, scale: float) -> None:
+        scale = config.clamp_scale(scale)
+        if scale == self.scale:
+            return
+        self.scale = scale
+        self._zoom(scale)
+        # Written straight away rather than on exit: a window that is closed by
+        # the machine going to sleep should still open at the size you set.
+        config.update(font_scale=scale)
+        self.SetStatusText(f"Text size {round(scale * 100)}%")
+
+    def _zoom(self, scale: float) -> None:
+        scale_fonts(self, scale)
+        # A ListCtrl sizes its columns for the font it had when they were made,
+        # so the text grows and the columns do not. Re-fitting keeps the
+        # heading readable at every size.
+        for panel in self.tabs.values():
+            table = getattr(panel, "table", None)
+            if table is None:
+                continue
+            for column in range(table.GetColumnCount()):
+                table.SetColumnWidth(column, wx.LIST_AUTOSIZE_USEHEADER)
 
     # --- the log ------------------------------------------------------------
 

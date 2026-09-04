@@ -61,6 +61,12 @@ class Proxy:
         return variables
 
 
+#: How far the window's text may be scaled, and by how much per keypress.
+FONT_SCALE_MIN = 0.7
+FONT_SCALE_MAX = 2.5
+FONT_SCALE_STEP = 1.1
+
+
 @dataclass(frozen=True)
 class Settings:
     """Everything wslx keeps."""
@@ -70,6 +76,10 @@ class Settings:
     directories: dict[str, str] = field(default_factory=dict)
     #: Port forwards wslx made: listen port -> {"distro": ..., "connect_port": ...}
     forwards: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Text size in the window, as a multiple of the system's UI font. Kept
+    #: here rather than recomputed per launch because someone who needed
+    #: larger text last time still needs it this time.
+    font_scale: float = 1.0
 
 
 def path() -> Path:
@@ -88,7 +98,22 @@ def load() -> Settings:
         proxy=Proxy(**{**asdict(Proxy()), **(raw.get("proxy") or {})}),
         directories=dict(raw.get("directories") or {}),
         forwards=dict(raw.get("forwards") or {}),
+        font_scale=clamp_scale(raw.get("font_scale", 1.0)),
     )
+
+
+def clamp_scale(value: Any) -> float:
+    """Keep a stored scale usable.
+
+    A hand-edited or corrupt value must not produce a window whose text is
+    invisible or a single letter per row, and neither must be a state a user
+    can get stuck in.
+    """
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return min(max(scale, FONT_SCALE_MIN), FONT_SCALE_MAX)
 
 
 def save(settings: Settings) -> None:

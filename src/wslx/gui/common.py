@@ -150,6 +150,33 @@ def toolbar(parent: wx.Window, buttons: Sequence[tuple[str, Callable[[wx.Event],
     return sizer
 
 
+def scale_fonts(window: wx.Window, scale: float) -> None:
+    """Resize every piece of text under `window` to `scale` × the system font.
+
+    `SetFont` applies to one window, not its children — a control created
+    before the call keeps the font it was born with — so the tree is walked.
+    The system UI font is the base rather than whatever each control currently
+    has, so scaling twice does not compound and going back to 1.0 lands exactly
+    where the window started.
+
+    The monospaced log pane stays monospaced: only its size changes.
+    """
+    base = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT).GetPointSize()
+    size = max(6, round(base * scale))
+
+    def apply(target: wx.Window) -> None:
+        font = target.GetFont()
+        if font.GetFamily() == wx.FONTFAMILY_TELETYPE:
+            target.SetFont(wx.Font(wx.FontInfo(size).Family(wx.FONTFAMILY_TELETYPE)))
+        else:
+            target.SetFont(wx.Font(wx.FontInfo(size)))
+        for child in target.GetChildren():
+            apply(child)
+
+    apply(window)
+    window.Layout()
+
+
 def ask(parent: wx.Window, message: str, title: str, default: str = "") -> str | None:
     """A one-line text prompt. None when the user backs out."""
     with wx.TextEntryDialog(parent, message, title, default) as dialog:
