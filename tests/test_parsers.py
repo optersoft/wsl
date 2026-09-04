@@ -297,18 +297,3 @@ def test_font_scale_cannot_be_stored_into_uselessness(stored, expected) -> None:
     value someone typed in by hand.
     """
     assert config.clamp_scale(stored) == expected
-
-
-@pytest.mark.parametrize(
-    ("stored", "expected"),
-    [
-        ("dark", "dark"),
-        ("WHITE", "white"),
-        (" Gray ", "gray"),
-        ("neon", "system"),
-        (None, "system"),
-    ],
-)
-def test_theme_falls_back_to_the_system_look(stored, expected) -> None:
-    """A hand-edited settings file must not produce a window with no colours."""
-    assert config.clean_theme(stored) == expected

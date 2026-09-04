@@ -61,11 +61,6 @@ class Proxy:
         return variables
 
 
-#: The looks the window offers. `system` means "whatever this computer says",
-#: which is the only one that follows a change of the OS theme, so it stays the
-#: default; the other three are for people whose answer is "not that".
-THEMES = ("system", "white", "gray", "dark")
-
 #: How far the window's text may be scaled, and by how much per keypress.
 FONT_SCALE_MIN = 0.7
 FONT_SCALE_MAX = 2.5
@@ -85,8 +80,6 @@ class Settings:
     #: here rather than recomputed per launch because someone who needed
     #: larger text last time still needs it this time.
     font_scale: float = 1.0
-    #: One of :data:`THEMES`.
-    theme: str = "system"
 
 
 def path() -> Path:
@@ -106,14 +99,7 @@ def load() -> Settings:
         directories=dict(raw.get("directories") or {}),
         forwards=dict(raw.get("forwards") or {}),
         font_scale=clamp_scale(raw.get("font_scale", 1.0)),
-        theme=clean_theme(raw.get("theme")),
     )
-
-
-def clean_theme(value: Any) -> str:
-    """An unknown theme is the system one, not a crash and not a blank window."""
-    name = str(value or "").strip().lower()
-    return name if name in THEMES else "system"
 
 
 def clamp_scale(value: Any) -> float:
